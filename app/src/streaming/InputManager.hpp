@@ -10,6 +10,7 @@
 #include "Singleton.hpp"
 #include "keyboard_view.hpp"
 #include "InputSessionState.hpp"
+#include "MotionReportState.hpp"
 #include <borealis.hpp>
 #include <chrono>
 #include <optional>
@@ -77,6 +78,7 @@ class MoonlightInputManager : public Singleton<MoonlightInputManager> {
     brls::ControllerButton mappingButtons[brls::_BUTTON_MAX];
     std::optional<brls::PanGestureStatus> panStatus;
     InputSessionState inputSession;
+    MotionReportLimiter motionReports;
     MouseStateS lastMouseState{};
     std::optional<uint32_t> fallbackTouchId;
     brls::Point desktopMouseRemainder = {0, 0};

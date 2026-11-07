@@ -2,6 +2,7 @@
 
 #include "GameStreamClient.hpp"
 #include "MoonlightSessionDecoderAndRenderProvider.hpp"
+#include "MotionReportState.hpp"
 #include <nanovg.h>
 #include <atomic>
 
@@ -32,6 +33,9 @@ class MoonlightSession {
     bool is_terminated() const { return m_is_terminated; }
     uint64_t connection_generation() const { return m_connection_generation.load(); }
     VideoDecoderDiagnostics decoder_diagnostics() const { return m_video_decoder->diagnostics(); }
+    uint16_t motion_report_rate(unsigned controller, unsigned type) const {
+        return m_motion_report_requests.get(controller, type);
+    }
 
     bool connection_status_is_poor() const {
         return m_connection_status_is_poor;
@@ -50,6 +54,7 @@ class MoonlightSession {
     static void connection_stage_complete(int);
     static void connection_stage_failed(int, int);
     static void connection_started();
+    static void set_motion_event_state(uint16_t controller, uint8_t type, uint16_t rate);
     static void connection_terminated(int);
     static void connection_log_message(const char* format, ...);
     static void connection_rumble(unsigned short, unsigned short,
@@ -88,6 +93,7 @@ class MoonlightSession {
     std::atomic<bool> m_is_terminated{false};
     std::atomic<bool> m_stop_requested{false};
     std::atomic<uint64_t> m_connection_generation{0};
+    MotionReportRequests m_motion_report_requests;
     bool m_connection_status_is_poor = false;
     bool m_use_hdr = false;
 

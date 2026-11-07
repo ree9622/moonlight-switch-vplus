@@ -90,6 +90,10 @@ void MoonlightSession::connection_started() {
     m_active_session->m_is_active = true;
 }
 
+void MoonlightSession::set_motion_event_state(uint16_t controller, uint8_t type, uint16_t rate) {
+    if (m_active_session) m_active_session->m_motion_report_requests.set(controller, type, rate);
+}
+
 void MoonlightSession::connection_terminated(int error_code) {
     brls::Logger::info("MoonlightSession: Connection terminated with code: {}", error_code);
 
@@ -249,6 +253,8 @@ void MoonlightSession::audio_renderer_decode_and_play_sample(
 // MARK: MoonlightSession
 
 void MoonlightSession::start(ServerCallback<bool> callback, bool is_sunshine) {
+    m_is_active = false;
+    m_motion_report_requests.clear();
     m_is_sunshine = is_sunshine;
     m_stop_requested = false;
     m_is_terminated = false;
@@ -320,6 +326,7 @@ void MoonlightSession::start(ServerCallback<bool> callback, bool is_sunshine) {
     m_connection_callbacks.rumbleTriggers = connection_rumble_triggers;
     m_connection_callbacks.connectionStatusUpdate = connection_status_update;
     m_connection_callbacks.setHdrMode = connection_set_hdr_mode;
+    m_connection_callbacks.setMotionEventState = set_motion_event_state;
 
     LiInitializeVideoCallbacks(&m_video_callbacks);
     m_video_callbacks.setup = video_decoder_setup;

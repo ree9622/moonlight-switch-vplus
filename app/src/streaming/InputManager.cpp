@@ -82,19 +82,18 @@ MoonlightInputManager::MoonlightInputManager() {
             ensureControllerRegistrations();
             if (event.controllerIndex < 0 ||
                 !inputSession.canSendController(static_cast<unsigned>(event.controllerIndex))) return;
-            
-            switch (event.type) {
-                case brls::SensorEventType::ACCEL:
-                    LiSendControllerMotionEvent((uint8_t)event.controllerIndex, LI_MOTION_TYPE_ACCEL, event.data[0], event.data[1], event.data[2]);
-                    break;
-                case brls::SensorEventType::GYRO:
-                    // Convert rad/s to deg/s
-                    LiSendControllerMotionEvent((uint8_t)event.controllerIndex, LI_MOTION_TYPE_GYRO, 
-                        event.data[0] * 57.2957795f, 
-                        event.data[1] * 57.2957795f, 
-                        event.data[2] * 57.2957795f);
-                    break;
-            }
+            const auto* session = MoonlightSession::activeSession();
+            const uint8_t type = event.type == brls::SensorEventType::ACCEL ? LI_MOTION_TYPE_ACCEL : LI_MOTION_TYPE_GYRO;
+            const uint16_t rate = session->motion_report_rate(event.controllerIndex, type);
+            const auto now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+            // Motion uses a separate network channel. Waiting for the host's
+            // request confirms that controller registration was processed.
+            if (!motionReports.eligible(event.controllerIndex, type, rate, now)) return;
+            const float scale = type == LI_MOTION_TYPE_GYRO ? 57.2957795f : 1.0f;
+            if (LiSendControllerMotionEvent(event.controllerIndex, type,
+                    event.data[0] * scale, event.data[1] * scale, event.data[2] * scale) == 0)
+                motionReports.markSent(event.controllerIndex, type, now);
         });
 }
 
@@ -305,6 +304,7 @@ bool MoonlightInputManager::isSessionCurrent() const {
 
 void MoonlightInputManager::beginInputSession(uint64_t generation) {
     inputSession.begin(generation);
+    motionReports.reset();
     std::fill_n(lastGamepadStates, GAMEPADS_MAX, GamepadState{});
     std::fill_n(rumbleCache, GAMEPADS_MAX, RumbleValues{});
     lastMouseState = {};
@@ -322,6 +322,7 @@ void MoonlightInputManager::beginInputSession(uint64_t generation) {
 
 void MoonlightInputManager::endInputSession() {
     inputSession.end();
+    motionReports.reset();
     fallbackTouchId.reset();
     panStatus.reset();
     lastMouseState = {};

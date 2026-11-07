@@ -25,3 +25,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(input_session_test PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 add_test(NAME input_session COMMAND input_session_test)
+
+add_executable(motion_report_test motion_report_test.cpp)
+target_compile_features(motion_report_test PRIVATE cxx_std_17)
+target_include_directories(motion_report_test PRIVATE ../app/src/streaming)
+add_test(NAME motion_report COMMAND motion_report_test)
