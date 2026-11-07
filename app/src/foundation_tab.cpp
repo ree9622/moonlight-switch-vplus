@@ -1,6 +1,7 @@
 #include "foundation_tab.hpp"
 #include "Settings.hpp"
 #include <algorithm>
+#include <fmt/format.h>
 
 using namespace brls;
 using namespace brls::literals;
@@ -8,7 +9,7 @@ using namespace brls::literals;
 FoundationTab::FoundationTab(const Host& host, int appId) : host(host), appId(appId) {
     inflateFromXMLRes("xml/views/ingame_overlay/foundation_tab.xml");
     bitrate->setText("vplus/bitrate"_i18n);
-    bitrate->setDetailText(std::to_string(Settings::instance().bitrate() / 1000) + " Mbps");
+    bitrate->setDetailText(fmt::format("{:.1f} Mbps", Settings::instance().bitrate() / 1000.0));
     command->setText("vplus/commands"_i18n);
     refresh->setText("vplus/refresh"_i18n);
     bitrate->registerClickAction([this](View*) { if (!busy) chooseBitrate(); return true; });
@@ -64,11 +65,11 @@ void FoundationTab::chooseBitrate() {
             status->setText("vplus/applying"_i18n);
             const int rate = rates[index];
             GameStreamClient::instance().foundation_set_bitrate(host, rate,
-                [this, life, rate](GSResult<bool> result) {
+                [this, life](GSResult<int> result) {
                     if (!*life) return;
                     setBusy(false);
                     if (!result.isSuccess()) { showFailure(result.error()); return; }
-                    bitrate->setDetailText(std::to_string(rate / 1000) + " Mbps");
+                    bitrate->setDetailText(fmt::format("{:.1f} Mbps", result.value() / 1000.0));
                     status->setText("vplus/applied"_i18n);
                 });
         });

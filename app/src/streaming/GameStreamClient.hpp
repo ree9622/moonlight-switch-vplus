@@ -102,12 +102,12 @@ class GameStreamClient : public Singleton<GameStreamClient> {
 
     void foundation_commands(const Host& host, int appId,
                              ServerCallback<std::vector<foundation::Command>>& callback);
-    void foundation_set_bitrate(const Host& host, int kbps, ServerCallback<bool>& callback);
+    void foundation_set_bitrate(const Host& host, int kbps, ServerCallback<int>& callback);
     void foundation_command(const Host& host, const std::string& id, ServerCallback<bool>& callback);
 
   private:
     void foundation_action(const Host& host, const std::string& path,
-                           const std::string& query, ServerCallback<bool>& callback);
+                           const std::string& query, ServerCallback<int>& callback, int requestedBitrate = 0);
     std::set<std::string> m_foundation_inflight;
     template <typename T, typename Worker>
     void with_cached_server_data(const std::string& address,

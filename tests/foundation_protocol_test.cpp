@@ -45,6 +45,44 @@ int main() {
     for (int i = 0; i < 40; ++i) deep = "<n>" + deep + "</n>";
     expect(!parseActionResponse(envelope(deep), "bitrate", error), "XML nesting bounded");
 
+    int applied = -1;
+    expect(foundation::parseBitrateResponse(envelope("<bitrate>20000</bitrate>"), 20000, applied, error)
+        && applied == 20000 && error.empty(), "modern host applied bitrate acknowledged");
+    expect(foundation::parseBitrateResponse(envelope("<bitrate>12000</bitrate>"), 20000, applied, error)
+        && applied == 12000, "host clamp is authoritative");
+    expect(foundation::parseBitrateResponse(envelope("<bitrate>1</bitrate>"), 20000, applied, error)
+        && applied == 20000, "legacy acknowledgment preserves request");
+    expect(foundation::parseBitrateResponse(envelope("<bitrate> 12000\n</bitrate>"), 20000, applied, error)
+        && applied == 12000, "formatted numeric response accepted");
+    expect(foundation::parseBitrateResponse(envelope("<bitrate>1000</bitrate>"), 1000, applied, error)
+        && applied == 1000, "minimum applied bitrate accepted");
+    expect(foundation::parseBitrateResponse(envelope("<bitrate>500000</bitrate>"), 100000, applied, error)
+        && applied == 500000, "host absolute ceiling accepted");
+    for (const auto& value : {"", "0", "-1", "-12000", "2", "999", "500001", "12000.0", "1e4",
+             "+12000", "12000kbps", "12000 20000", "2147483648", "999999999999999999999"}) {
+        applied = 20000;
+        expect(!foundation::parseBitrateResponse(envelope("<bitrate>" + std::string(value) + "</bitrate>"),
+            20000, applied, error), "invalid applied bitrate rejected");
+        expect(applied == 0 && !error.empty(), "failed bitrate does not expose stale applied value");
+    }
+    for (const auto& xml : {envelope(""), envelope("<bitrate/>"), envelope("<supercmd>1</supercmd>"),
+             envelope("<other><bitrate>12000</bitrate></other>"),
+             envelope("<bitrate><nested/>12000</bitrate>"),
+             envelope("<bitrate>12000</bitrate><bitrate>12000</bitrate>"),
+             std::string("<root status_code=\"404\"><bitrate>12000</bitrate></root>"),
+             std::string("<root status_code=\"200\"><bitrate>12000</bitrate>"),
+             std::string("<!DOCTYPE root [<!ENTITY n '12000'>]><root status_code=\"200\"><bitrate>&n;</bitrate></root>")}) {
+        expect(!foundation::parseBitrateResponse(xml, 20000, applied, error), "unconfirmed bitrate response rejected");
+    }
+    for (int requested : {-1, 0, 999, 100001}) {
+        expect(!foundation::parseBitrateResponse(envelope("<bitrate>1</bitrate>"), requested, applied, error),
+            "legacy acknowledgment requires valid request");
+        expect(!foundation::parseBitrateResponse(envelope("<bitrate>12000</bitrate>"), requested, applied, error),
+            "modern acknowledgment requires valid request");
+    }
+    expect(foundation::parseBitrateResponse(envelope("<bitrate>1</bitrate>"), 100000, applied, error)
+        && applied == 100000 && error.empty(), "successful bitrate clears previous rejection");
+
     std::vector<foundation::Command> commands;
     const auto valid = envelope(app(4, "[{\"id\":\"wrong\",\"name\":\"Other app\"}]") +
         app(7, "[{\"id\":\"a&amp;b=2\",\"name\":\"화면 &amp; 소리 🎮\"}]"));

@@ -172,6 +172,34 @@ bool parseActionResponse(const std::string& xml, const std::string& action,
     return true;
 }
 
+bool parseBitrateResponse(const std::string& xml, int requestedKbps,
+                          int& appliedKbps, std::string& error) {
+    appliedKbps = 0;
+    error.clear();
+    if (requestedKbps < 1000 || requestedKbps > 100000) {
+        error = "Invalid requested bitrate";
+        return false;
+    }
+    Document document;
+    if (!parseDocument(xml, document, error)) return false;
+    bool duplicate = false;
+    const auto* result = child(*document.root, "bitrate", duplicate);
+    if (!result || duplicate || !result->children.empty()) {
+        error = "Host did not confirm the requested bitrate";
+        return false;
+    }
+    const auto text = trim(result->text);
+    int value = 0;
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (parsed.ec != std::errc() || parsed.ptr != text.data() + text.size() ||
+        (value != 1 && (value < 1000 || value > 500000))) {
+        error = "Host returned an invalid applied bitrate";
+        return false;
+    }
+    appliedKbps = value == 1 ? requestedKbps : value;
+    return true;
+}
+
 bool parseCommands(const std::string& xml, int appId,
                    std::vector<Command>& commands, std::string& error) {
     commands.clear();

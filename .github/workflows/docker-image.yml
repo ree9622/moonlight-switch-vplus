@@ -28,8 +28,8 @@ jobs:
       image: devkitpro/devkita64:latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
+      - name: Fetch Switch dependencies
+        run: git submodule update --init --recursive --depth 1 --jobs 3 extern/borealis extern/moonlight-common-c extern/CImg extern/mdns
       - name: Build environment
         run: |
           dkp-pacman -Q devkitA64 libnx switch-ffmpeg
