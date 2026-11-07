@@ -9,6 +9,8 @@
 
 #include "Singleton.hpp"
 #include "keyboard_view.hpp"
+#include "InputSessionState.hpp"
+#include "MotionReportState.hpp"
 #include <borealis.hpp>
 #include <chrono>
 #include <optional>
@@ -58,6 +60,9 @@ class MoonlightInputManager : public Singleton<MoonlightInputManager> {
     void updateTouchScreenPanDelta(brls::PanGestureStatus panStatus);
     void reloadButtonMappingLayout();
     void setInputEnabled(bool enabled) { inputEnabled = enabled; }
+    // Call on the UI thread after connection start and before/after teardown.
+    void beginInputSession(uint64_t generation);
+    void endInputSession();
     static void leftMouseClick();
     static void rightMouseClick();
 
@@ -68,11 +73,14 @@ class MoonlightInputManager : public Singleton<MoonlightInputManager> {
         Vertical,
     };
 
-    RumbleValues rumbleCache[GAMEPADS_MAX];
-    GamepadState lastGamepadStates[GAMEPADS_MAX];
+    RumbleValues rumbleCache[GAMEPADS_MAX]{};
+    GamepadState lastGamepadStates[GAMEPADS_MAX]{};
     brls::ControllerButton mappingButtons[brls::_BUTTON_MAX];
     std::optional<brls::PanGestureStatus> panStatus;
-    std::map<uint32_t, bool> activeTouchIDs;
+    InputSessionState inputSession;
+    MotionReportLimiter motionReports;
+    MouseStateS lastMouseState{};
+    std::optional<uint32_t> fallbackTouchId;
     brls::Point desktopMouseRemainder = {0, 0};
     brls::Point desktopScrollRemainder = {0, 0};
     float pendingHorizontalScroll = 0;
@@ -90,6 +98,9 @@ class MoonlightInputManager : public Singleton<MoonlightInputManager> {
 
     GamepadState getControllerState(int controllerNum, bool specialKey);
     void handleControllers(bool specialKey);
+    void ensureControllerRegistrations();
+    bool isSessionCurrent() const;
+    bool sendTouch(uint32_t pointer, InputSessionState::TouchAction action, brls::Point position);
+    bool cancelTouches();
 
-    static short controllersToMap();
 };

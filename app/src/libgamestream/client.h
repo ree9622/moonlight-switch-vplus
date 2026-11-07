@@ -47,6 +47,7 @@ typedef struct _SERVER_DATA {
 
 void gs_set_error(std::string error);
 std::string gs_error();
+const std::string& gs_client_id();
 
 int gs_init(PSERVER_DATA server, const std::string address);
 int gs_app_boxart(PSERVER_DATA server, int app_id, Data* out);

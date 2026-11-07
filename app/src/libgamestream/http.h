@@ -30,3 +30,6 @@ enum HTTPRequestTimeout : long {
 int http_init(const std::string& key_directory);
 int http_request(const std::string& url, Data* data, HTTPRequestTimeout timeout);
 
+// Authenticated, bounded requests for optional host controls. No automatic retry.
+int http_request_control(const std::string& url, Data* data, std::string& error);
+

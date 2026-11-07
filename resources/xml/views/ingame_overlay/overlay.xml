@@ -19,6 +19,10 @@
             <brls:Tab label="@i18n/streaming/logout" >
                 <LogoutTab />
             </brls:Tab>
+
+            <brls:Tab label="@i18n/vplus/tab">
+                <FoundationTab />
+            </brls:Tab>
             
         </brls:TabFrame>
     

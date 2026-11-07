@@ -1,4 +1,6 @@
 #pragma once
+#include <atomic>
+#include "VideoStatsWindow.hpp"
 
 #if defined(PLATFORM_ANDROID)
 #include <vector>
@@ -20,9 +22,10 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
     int submit_decode_unit(PDECODE_UNIT decode_unit) override;
     int capabilities() const override;
     VideoDecodeStats* video_decode_stats() override;
+    VideoDecoderDiagnostics diagnostics() const override;
 
   private:
-    int decode(char* indata, int inlen);
+    int decode(char* indata, int inlen, uint64_t hostPtsUs);
     int drain_frames();
     int get_frame(bool native_frame, AVFrame** frame);
     int configure_decoder_context(bool enable_hw_decode, bool enable_low_delay,
@@ -58,6 +61,8 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
     AVCodecID m_codec_id = AV_CODEC_ID_NONE;
 
     bool m_hw_decode_active = false;
+    std::atomic<int> m_diagnostic_codec{AV_CODEC_ID_NONE};
+    std::atomic<int> m_diagnostic_frame_format{AV_PIX_FMT_NONE};
     bool m_using_android_mediacodec_decoder = false;
     bool m_supports_slice_threading = false;
     bool m_use_decoder_threads = false;
@@ -70,7 +75,8 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
 
     VideoDecodeStats m_video_decode_stats_progress = {};
     VideoDecodeStats m_video_decode_stats_cache = {};
-    uint64_t timeCount = 0;
+    video_stats::FrameRateWindow m_frame_rate_window;
+    void publish_decode_stats(uint64_t now);
 
     char* m_ffmpeg_buffer = nullptr;
   #if defined(PLATFORM_ANDROID)

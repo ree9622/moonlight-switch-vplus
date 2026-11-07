@@ -1,6 +1,7 @@
 #include "GameStreamClient.hpp"
 #include "Settings.hpp"
 #include "WakeOnLanManager.hpp"
+#include "http.h"
 #include <borealis.hpp>
 #include <algorithm>
 #include <atomic>
@@ -783,4 +784,96 @@ void GameStreamClient::quit(const std::string& address,
 void GameStreamClient::quit(const Host& host,
                             ServerCallback<bool>& callback) {
     quit(active_address(host), callback);
+}
+
+namespace {
+std::string foundation_url(const SERVER_DATA& server, const std::string& path) {
+    return "https://" + server.address + ":" + std::to_string(server.httpsPort) + "/" + path
+        + "?uniqueid=" + foundation::encodeQuery(gs_client_id());
+}
+}
+
+void GameStreamClient::foundation_action(const Host& host, const std::string& path,
+                                         const std::string& query, ServerCallback<int>& callback, int requestedBitrate) {
+    const auto address = active_address(host);
+    const auto it = m_server_data.find(address);
+    if (it == m_server_data.end() || !it->second.paired) {
+        callback(GSResult<int>::failure("vplus/not_connected"_i18n));
+        return;
+    }
+    if (!m_foundation_inflight.insert(address).second) {
+        callback(GSResult<int>::failure("vplus/in_progress"_i18n));
+        return;
+    }
+    // Copy the endpoint on the UI thread. Workers never mutate the host cache.
+    const auto url = foundation_url(it->second, path) + "&" + query;
+    brls::async([this, address, url, path, requestedBitrate, callback] {
+        Data data;
+        std::string error;
+        int applied = 1;
+        bool ok = http_request_control(url, &data, error) == GS_OK;
+        if (ok) {
+            const std::string response(reinterpret_cast<const char*>(data.bytes()), data.size());
+            ok = path == "bitrate"
+                ? foundation::parseBitrateResponse(response, requestedBitrate, applied, error)
+                : foundation::parseActionResponse(response, path, error);
+        }
+        brls::sync([this, address, ok, applied, error, callback] {
+            m_foundation_inflight.erase(address);
+            callback(ok ? GSResult<int>::success(applied) : GSResult<int>::failure(error));
+        });
+    });
+}
+
+void GameStreamClient::foundation_set_bitrate(const Host& host, int kbps, ServerCallback<int>& callback) {
+    if (kbps < 1000 || kbps > 100000) {
+        callback(GSResult<int>::failure("Invalid bitrate"));
+        return;
+    }
+    foundation_action(host, "bitrate", "bitrate=" + std::to_string(kbps),
+        [callback](GSResult<int> result) {
+            // A tab can disappear while the request is in flight. Preserve the
+            // acknowledged setting independently of the view's lifetime.
+            if (result.isSuccess()) {
+                Settings::instance().set_bitrate(result.value());
+                Settings::instance().save();
+            }
+            callback(result);
+        }, kbps);
+}
+
+void GameStreamClient::foundation_command(const Host& host, const std::string& id,
+                                          ServerCallback<bool>& callback) {
+    if (id.empty() || id.size() > 512) {
+        callback(GSResult<bool>::failure("Invalid command"));
+        return;
+    }
+    foundation_action(host, "supercmd", "cmdId=" + foundation::encodeQuery(id),
+        [callback](GSResult<int> result) {
+            callback(result.isSuccess() ? GSResult<bool>::success(true)
+                                       : GSResult<bool>::failure(result.error()));
+        });
+}
+
+void GameStreamClient::foundation_commands(const Host& host, int appId,
+    ServerCallback<std::vector<foundation::Command>>& callback) {
+    const auto it = m_server_data.find(active_address(host));
+    if (it == m_server_data.end() || !it->second.paired) {
+        callback(GSResult<std::vector<foundation::Command>>::failure("vplus/not_connected"_i18n));
+        return;
+    }
+    const auto url = foundation_url(it->second, "applist");
+    brls::async([url, appId, callback] {
+        Data data;
+        std::string error;
+        std::vector<foundation::Command> commands;
+        bool ok = http_request_control(url, &data, error) == GS_OK;
+        if (ok)
+            ok = foundation::parseCommands(
+                std::string(reinterpret_cast<const char*>(data.bytes()), data.size()), appId, commands, error);
+        brls::sync([ok, commands, error, callback] {
+            callback(ok ? GSResult<std::vector<foundation::Command>>::success(commands)
+                        : GSResult<std::vector<foundation::Command>>::failure(error));
+        });
+    });
 }

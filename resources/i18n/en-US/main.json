@@ -1,4 +1,31 @@
 {
+    "vplus": {
+        "frame_buffer": "Video buffer (next connection)",
+        "buffer_low": "1 — lower latency",
+        "buffer_balanced": "2 — balanced",
+        "buffer_smooth": "3 — more jitter protection",
+        "buffer_saved": "Video buffer saved. Disconnect and reconnect to apply; lower buffering can increase stutter on unstable Wi-Fi.",
+        "in_progress": "Another request is still pending. Wait for its result before sending another.",
+        "title": "Host controls",
+        "tab": "V+",
+        "bitrate": "Adjust live bitrate",
+        "commands": "Computer commands",
+        "refresh": "Refresh commands",
+        "loading": "Checking computer commands…",
+        "no_commands": "No commands are advertised for this app. Live bitrate requires a compatible host.",
+        "ready": "Commands are configured on the computer. Live bitrate requires a compatible host.",
+        "load_failed": "Could not read computer commands. Check the connection, then refresh.",
+        "not_connected": "Connect and pair with this computer first.",
+        "failed": "The computer did not confirm the change. Check your host and connection. The request was not retried.",
+        "applying": "Waiting for the computer…",
+        "applied": "Bitrate applied. This value will also be used for the next stream.",
+        "confirm_command": "Run this command on the connected computer?",
+        "execute": "Run",
+        "command_accepted": "The computer accepted the command. Check its result on the computer.",
+        "pacing": "Frame pacing (reconnect to apply)",
+        "pacing_host": "V+ host-cadence precise sync",
+        "pacing_legacy": "Legacy local pacing"
+    },
     "about": {
         "about": "Moonlight-Switch is a third-party game streaming client based on Moonlight-Common-C for the Nintendo Switch",
         "link_gbatemp": "GbaTemp Page",
@@ -13,7 +40,7 @@
         "thanks_5": " Everyone involved into app development",
         "thanks_6": " You, for using my homebrew!",
         "title": "About",
-        "version": "Moonlight-Switch v{} by XITRIX"
+        "version": "Moonlight V+ Switch 0.1.1 · Moonlight-Switch v{}"
     },
     "add_host": {
         "connect": "Connect",
@@ -194,5 +221,5 @@
         "favorites": "Favorites",
         "settings": "Settings"
     },
-    "title": "Moonlight"
+    "title": "Moonlight V+ Switch"
 }

@@ -25,6 +25,8 @@
 
 #include <curl/curl.h>
 #include <cstring>
+#include <limits>
+#include <vector>
 
 static bool curlGlobalInit = false;
 static std::string certificateFilePath;
@@ -147,4 +149,55 @@ int http_request(const std::string& url, Data* data,
 
 void http_cleanup() {
     curl_global_cleanup();
+}
+
+namespace {
+constexpr size_t CONTROL_RESPONSE_LIMIT = 1024 * 1024;
+size_t write_control_response(void* contents, size_t size, size_t count, void* user) {
+    auto& bytes = *static_cast<std::vector<char>*>(user);
+    if (size != 0 && count > std::numeric_limits<size_t>::max() / size)
+        return 0;
+    const size_t length = size * count;
+    if (length > CONTROL_RESPONSE_LIMIT - bytes.size())
+        return 0;
+    const auto* begin = static_cast<const char*>(contents);
+    bytes.insert(bytes.end(), begin, begin + length);
+    return length;
+}
+}
+
+int http_request_control(const std::string& url, Data* data, std::string& error) {
+    error.clear();
+    CURL* curl = makeCurl();
+    if (!curl) {
+        error = "Unable to create host connection";
+        return GS_FAILED;
+    }
+    std::vector<char> response;
+    curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L);
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_control_response);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    const auto result = curl_easy_perform(curl);
+    long httpStatus = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpStatus);
+    freeCurl(curl);
+    if (result != CURLE_OK) {
+        error = curl_easy_strerror(result);
+        return GS_FAILED;
+    }
+    if (httpStatus != 200) {
+        error = "Host returned HTTP " + std::to_string(httpStatus);
+        return GS_FAILED;
+    }
+    if (response.empty()) {
+        error = "Host returned an empty response";
+        return GS_FAILED;
+    }
+    *data = Data(response.data(), response.size());
+    return GS_OK;
 }

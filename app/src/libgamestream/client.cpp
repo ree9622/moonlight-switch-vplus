@@ -37,6 +37,7 @@
 #define CHANNEL_MASK_51_SURROUND 0xFC
 
 static std::string unique_id = "0123456789ABCDEF";
+const std::string& gs_client_id() { return unique_id; }
 
 int extractVersionQuadFromString(const char* string, int* quad) {
     const char* nextNumber = string;

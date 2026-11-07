@@ -4,6 +4,7 @@
 #include "InputManager.hpp"
 #include "Settings.hpp"
 #include "borealis.hpp"
+#include "ClientDiagnostics.hpp"
 #include <string.h>
 
 #if defined(PLATFORM_IOS) || defined(PLATFORM_VISIONOS)
@@ -85,7 +86,12 @@ void MoonlightSession::connection_started() {
         return;
 
     m_active_session->m_stop_requested = false;
+    m_active_session->m_connection_generation.fetch_add(1);
     m_active_session->m_is_active = true;
+}
+
+void MoonlightSession::set_motion_event_state(uint16_t controller, uint8_t type, uint16_t rate) {
+    if (m_active_session) m_active_session->m_motion_report_requests.set(controller, type, rate);
 }
 
 void MoonlightSession::connection_terminated(int error_code) {
@@ -93,6 +99,8 @@ void MoonlightSession::connection_terminated(int error_code) {
 
     if (!m_active_session)
         return;
+
+    m_active_session->m_is_active = false;
 
     if (m_active_session->m_stop_requested) {
         brls::Logger::info("MoonlightSession: Termination acknowledged after stop request");
@@ -245,6 +253,8 @@ void MoonlightSession::audio_renderer_decode_and_play_sample(
 // MARK: MoonlightSession
 
 void MoonlightSession::start(ServerCallback<bool> callback, bool is_sunshine) {
+    m_is_active = false;
+    m_motion_report_requests.clear();
     m_is_sunshine = is_sunshine;
     m_stop_requested = false;
     m_is_terminated = false;
@@ -316,6 +326,7 @@ void MoonlightSession::start(ServerCallback<bool> callback, bool is_sunshine) {
     m_connection_callbacks.rumbleTriggers = connection_rumble_triggers;
     m_connection_callbacks.connectionStatusUpdate = connection_status_update;
     m_connection_callbacks.setHdrMode = connection_set_hdr_mode;
+    m_connection_callbacks.setMotionEventState = set_motion_event_state;
 
     LiInitializeVideoCallbacks(&m_video_callbacks);
     m_video_callbacks.setup = video_decoder_setup;
@@ -374,6 +385,7 @@ void MoonlightSession::stop(int terminate_app) {
         return;
 
     m_stop_requested = true;
+    m_is_active = false;
 
     if (terminate_app) {
         GameStreamClient::instance().quit(m_address, [](auto _) {});
@@ -413,5 +425,44 @@ void MoonlightSession::draw(NVGcontext* vg, int width, int height) {
                 *m_video_renderer->video_render_stats();
             m_last_stats_update_ms = now;
         }
+#ifdef PLATFORM_SWITCH
+        if (is_active() && (m_last_diagnostics_generation != connection_generation() ||
+            m_last_diagnostics_sample_ms == 0 || now - m_last_diagnostics_sample_ms >= 5000)) {
+            const auto decoder = decoder_diagnostics();
+            uint32_t rtt = 0, variance = 0;
+            const bool hasRtt = LiGetEstimatedRttInfo(&rtt, &variance);
+            const auto& video = m_session_stats.video_decode_stats;
+            const auto& render = m_session_stats.video_render_stats;
+            const auto pacing = AVFrameHolder::instance().getPacingDiagnostics();
+            writeClientDiagnostics(Settings::instance().working_dir(),
+                fmt::format("session={} t_ms={} mode={}x{}@{} requested_kbps={} codec={} frame={} hardware={} "
+                            "received_fps={:.2f} decoded_fps={:.2f} rendered_fps={:.2f} decode_ms={:.2f} "
+                            "decoder_delay_ms={:.2f} network_drops={} rtt_ms={} rtt_variance_ms={} "
+                            "queue={} reserve={} capacity={} render_ms={:.2f} post_ms={:.2f} rcas_ms={:.2f} "
+                            "post_frames={} rcas_requested={} queue_empty={} queue_skips={} "
+                            "queue_holds={} queue_presented={} queue_resyncs={} source_fps={:.2f} "
+                            "host_cadence={} vsync={} host_pts_frames={} missing_pts={} clock_resets={} "
+                            "clock_mad_ms={:.3f} cushion_ms={:.3f}",
+                    connection_generation(), now, m_config.width, m_config.height, m_config.fps, m_config.bitrate,
+                    decoder.codec, decoder.pixelFormat, decoder.frameReceived ? (decoder.hardwareFrame ? "yes" : "no") : "pending",
+                    video.current_received_fps, video.current_decoded_fps, render.rendered_fps,
+                    video.current_decoding_time, video.current_decoder_delay, video.network_dropped_frames,
+                    hasRtt ? std::to_string(rtt) : "unknown", hasRtt ? std::to_string(variance) : "unknown",
+                    AVFrameHolder::instance().getFrameQueueSize(), AVFrameHolder::instance().getFrameQueueTargetDepth(),
+                    AVFrameHolder::instance().getFrameQueueCapacity(), render.rendering_time,
+                    render.post_processing_time, render.sharpening_time, render.post_processed_frames,
+                    Settings::instance().rcas() ? "yes" : "no",
+                    AVFrameHolder::instance().getFrameQueueEmptyStat(),
+                    AVFrameHolder::instance().getFrameQueuePacingSkipStat(),
+                    AVFrameHolder::instance().getFrameQueueScheduledHoldStat(),
+                    AVFrameHolder::instance().getFrameQueueLocalClockPacedFrameStat(),
+                    AVFrameHolder::instance().getFrameQueuePlayoutResyncStat(),
+                    AVFrameHolder::instance().getFrameQueueEstimatedSourceFps(),
+                    pacing.requested ? "yes" : "no", pacing.displaySynced ? "yes" : "no",
+                    pacing.hostFrames, pacing.missingPts, pacing.resets, pacing.jitterMs, pacing.cushionMs));
+            m_last_diagnostics_sample_ms = now;
+            m_last_diagnostics_generation = connection_generation();
+        }
+#endif
     }
 }

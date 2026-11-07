@@ -42,6 +42,20 @@ FFmpegVideoDecoder::FFmpegVideoDecoder() {
 
 FFmpegVideoDecoder::~FFmpegVideoDecoder() = default;
 
+VideoDecoderDiagnostics FFmpegVideoDecoder::diagnostics() const {
+    VideoDecoderDiagnostics result;
+    result.codec = avcodec_get_name(static_cast<AVCodecID>(m_diagnostic_codec.load()));
+    const auto format = static_cast<AVPixelFormat>(m_diagnostic_frame_format.load());
+    result.frameReceived = format != AV_PIX_FMT_NONE;
+    if (result.frameReceived) {
+        const char* name = av_get_pix_fmt_name(format);
+        result.pixelFormat = name ? name : "unknown";
+        const auto* descriptor = av_pix_fmt_desc_get(format);
+        result.hardwareFrame = descriptor && (descriptor->flags & AV_PIX_FMT_FLAG_HWACCEL);
+    }
+    return result;
+}
+
 void ffmpegLog(void* ptr, int level, const char* fmt, va_list vargs) {
     std::string message;
     va_list ap_copy;
@@ -66,6 +80,9 @@ int FFmpegVideoDecoder::configure_decoder_context(bool enable_hw_decode,
         return AVERROR(ENOMEM);
     }
 
+#if defined(PLATFORM_SWITCH)
+    m_decoder_context->pkt_timebase = AVRational{1, 1000000};
+#endif
     m_decoder_context->flags |= AV_CODEC_FLAG_OUTPUT_CORRUPT;
     m_decoder_context->flags2 |= AV_CODEC_FLAG2_SHOW_ALL;
     m_decoder_context->flags2 |= AV_CODEC_FLAG2_FAST;
@@ -390,6 +407,13 @@ int FFmpegVideoDecoder::prepare_android_h264_extradata(PDECODE_UNIT decode_unit)
 
 int FFmpegVideoDecoder::setup(int video_format, int width, int height,
                               int redraw_rate, void* context, int dr_flags) {
+    m_frame_rate_window.reset();
+    m_video_decode_stats_progress = {};
+    m_video_decode_stats_cache = {};
+    m_last_frame = 0;
+    m_frames_in = m_frames_out = 0;
+    m_diagnostic_frame_format.store(AV_PIX_FMT_NONE);
+    m_diagnostic_codec.store(AV_CODEC_ID_NONE);
     m_stream_fps = redraw_rate;
 #if defined(PLATFORM_ANDROID)
     ffmpeg::decoder::cleanupAndroidMediaCodecState(m_android_mediacodec);
@@ -506,6 +530,8 @@ int FFmpegVideoDecoder::setup(int video_format, int width, int height,
         brls::Logger::error("FFmpeg: Couldn't find decoder");
         return -1;
     }
+
+    m_diagnostic_codec.store(m_codec_id);
 
     int err = 0;
 
@@ -693,10 +719,6 @@ int FFmpegVideoDecoder::submit_decode_unit(PDECODE_UNIT decode_unit) {
     if (decode_unit->fullLength < DECODER_BUFFER_SIZE) {
         PLENTRY entry = decode_unit->bufferList;
 
-        if (m_video_decode_stats_progress.measurement_start_timestamp == 0) {
-            m_video_decode_stats_progress.measurement_start_timestamp = LiGetMillis();
-        }
-
         if (!m_last_frame) {
             m_last_frame = decode_unit->frameNumber;
         } else {
@@ -711,6 +733,10 @@ int FFmpegVideoDecoder::submit_decode_unit(PDECODE_UNIT decode_unit) {
 
         m_video_decode_stats_progress.current_received_frames++;
         m_video_decode_stats_progress.total_frames++;
+        const uint64_t receivedAtMs = decode_unit->receiveTimeUs / 1000;
+        const uint64_t submittedAtMs = LiGetMillis();
+        if (receivedAtMs != 0 && submittedAtMs >= receivedAtMs)
+            m_video_decode_stats_progress.current_reassembly_time += submittedAtMs - receivedAtMs;
 
 #if defined(PLATFORM_ANDROID)
         if (!m_decoder_ready) {
@@ -760,7 +786,6 @@ int FFmpegVideoDecoder::submit_decode_unit(PDECODE_UNIT decode_unit) {
             memset(m_ffmpeg_buffer + length, 0, AV_INPUT_BUFFER_PADDING_SIZE);
         }
 
-        m_video_decode_stats_progress.current_reassembly_time += LiGetMillis() - (decode_unit->receiveTimeUs / 1000);
         m_frames_in++;
 
         uint64_t before_decode = LiGetMillis();
@@ -769,12 +794,8 @@ int FFmpegVideoDecoder::submit_decode_unit(PDECODE_UNIT decode_unit) {
             brls::Logger::error("FFmpeg: Big buffer to decode...");
         }
 
-        const int decoded_frames = decode(m_ffmpeg_buffer, length);
+        const int decoded_frames = decode(m_ffmpeg_buffer, length, decode_unit->presentationTimeUs);
         if (decoded_frames >= 0) {
-            if (decoded_frames == 0) {
-                return DR_OK;
-            }
-
             m_frames_out += decoded_frames;
 
             auto decodeTime = LiGetMillis() - before_decode;
@@ -786,57 +807,11 @@ int FFmpegVideoDecoder::submit_decode_unit(PDECODE_UNIT decode_unit) {
             if (pending_frames < 0) {
                 pending_frames = 0;
             }
-            m_video_decode_stats_progress.current_decoder_delay_time +=
-                pending_frames * (1000 / m_stream_fps);
+            if (decoded_frames > 0 && m_stream_fps > 0)
+                m_video_decode_stats_progress.current_decoder_delay_time +=
+                    pending_frames * (1000 / m_stream_fps) * decoded_frames;
             m_video_decode_stats_progress.current_decoded_frames += decoded_frames;
-
-            const int time_interval = 60;
-            timeCount += decodeTime;
-            if (timeCount >= time_interval) {
-                // brls::Logger::debug("FPS: {}", frames / 5.0f);
-
-                m_video_decode_stats_cache = m_video_decode_stats_progress;
-                m_video_decode_stats_progress = {};
-
-                // Preserve dropped frames count
-                m_video_decode_stats_progress.total_received_frames = m_video_decode_stats_cache.total_received_frames + m_video_decode_stats_cache.current_received_frames;
-                m_video_decode_stats_progress.total_decoded_frames = m_video_decode_stats_cache.total_decoded_frames + m_video_decode_stats_cache.current_decoded_frames;
-                m_video_decode_stats_progress.total_reassembly_time = m_video_decode_stats_cache.total_reassembly_time + m_video_decode_stats_cache.current_reassembly_time;
-                m_video_decode_stats_progress.total_decode_time = m_video_decode_stats_cache.total_decode_time + m_video_decode_stats_cache.current_decode_time;
-                m_video_decode_stats_progress.total_decoder_delay_time = m_video_decode_stats_cache.total_decoder_delay_time + m_video_decode_stats_cache.current_decoder_delay_time;
-
-                m_video_decode_stats_progress.network_dropped_frames = m_video_decode_stats_cache.network_dropped_frames;
-
-                uint64_t now = LiGetMillis();
-                m_video_decode_stats_cache.current_host_fps =
-                    (float)m_video_decode_stats_cache.total_frames /
-                    ((float)(now - m_video_decode_stats_cache.measurement_start_timestamp) /
-                    1000);
-                m_video_decode_stats_cache.current_received_fps =
-                        (float)m_video_decode_stats_cache.current_received_frames /
-                        ((float)(now - m_video_decode_stats_cache.measurement_start_timestamp) /
-                    1000);
-                m_video_decode_stats_cache.current_decoded_fps =
-                        (float)m_video_decode_stats_cache.current_decoded_frames /
-                        ((float)(now - m_video_decode_stats_cache.measurement_start_timestamp) /
-                    1000);
-
-                m_video_decode_stats_cache.current_receive_time = (float) m_video_decode_stats_cache.current_reassembly_time /
-                                                                  (float) m_video_decode_stats_cache.current_received_frames;
-                m_video_decode_stats_cache.current_decoding_time = (float) m_video_decode_stats_cache.current_decode_time /
-                                                                   (float) m_video_decode_stats_cache.current_decoded_frames;
-                m_video_decode_stats_cache.current_decoder_delay = (float) m_video_decode_stats_cache.current_decoder_delay_time /
-                                                                   (float) m_video_decode_stats_cache.current_decoded_frames;
-
-                m_video_decode_stats_cache.session_receive_time = (float) m_video_decode_stats_cache.total_reassembly_time /
-                                                                  (float) m_video_decode_stats_cache.total_received_frames;
-                m_video_decode_stats_cache.session_decoding_time = (float) m_video_decode_stats_cache.total_decode_time /
-                                                                   (float) m_video_decode_stats_cache.total_decoded_frames;
-                m_video_decode_stats_cache.session_decoder_delay = (float) m_video_decode_stats_cache.total_decoder_delay_time /
-                                                                   (float) m_video_decode_stats_cache.total_decoded_frames;
-
-                timeCount -= time_interval;
-            }
+            publish_decode_stats(LiGetMillis());
 
         }
         else {
@@ -849,6 +824,49 @@ int FFmpegVideoDecoder::submit_decode_unit(PDECODE_UNIT decode_unit) {
     return DR_OK;
 }
 
+void FFmpegVideoDecoder::publish_decode_stats(uint64_t now) {
+    auto& progress = m_video_decode_stats_progress;
+    const video_stats::FrameCounts totals{
+        static_cast<uint64_t>(progress.total_received_frames) + progress.current_received_frames +
+            progress.network_dropped_frames,
+        static_cast<uint64_t>(progress.total_received_frames) + progress.current_received_frames,
+        static_cast<uint64_t>(progress.total_decoded_frames) + progress.current_decoded_frames};
+    const bool firstObservation = !m_frame_rate_window.started();
+    const auto rates = m_frame_rate_window.observe(now, totals);
+    if (!rates && !firstObservation) return;
+
+    auto sample = progress;
+    // Session averages include the just-finished window, including the initial
+    // boundary frame. Window averages use only that window's own counters.
+    sample.total_received_frames += sample.current_received_frames;
+    sample.total_decoded_frames += sample.current_decoded_frames;
+    sample.total_reassembly_time += sample.current_reassembly_time;
+    sample.total_decode_time += sample.current_decode_time;
+    sample.total_decoder_delay_time += sample.current_decoder_delay_time;
+    if (rates) {
+        sample.measurement_start_timestamp = rates->startMs;
+        sample.current_host_fps = rates->host;
+        sample.current_received_fps = rates->received;
+        sample.current_decoded_fps = rates->decoded;
+        sample.current_receive_time = video_stats::average(sample.current_reassembly_time, sample.current_received_frames);
+        sample.current_decoding_time = video_stats::average(sample.current_decode_time, sample.current_decoded_frames);
+        sample.current_decoder_delay = video_stats::average(sample.current_decoder_delay_time, sample.current_decoded_frames);
+        sample.session_receive_time = video_stats::average(sample.total_reassembly_time, sample.total_received_frames);
+        sample.session_decoding_time = video_stats::average(sample.total_decode_time, sample.total_decoded_frames);
+        sample.session_decoder_delay = video_stats::average(sample.total_decoder_delay_time, sample.total_decoded_frames);
+        m_video_decode_stats_cache = sample;
+    }
+
+    progress = {};
+    progress.total_received_frames = sample.total_received_frames;
+    progress.total_decoded_frames = sample.total_decoded_frames;
+    progress.total_reassembly_time = sample.total_reassembly_time;
+    progress.total_decode_time = sample.total_decode_time;
+    progress.total_decoder_delay_time = sample.total_decoder_delay_time;
+    progress.network_dropped_frames = sample.network_dropped_frames;
+    progress.measurement_start_timestamp = now;
+}
+
 int FFmpegVideoDecoder::capabilities() const {
 #if defined(__SWITCH__)
     return CAPABILITY_SLICES_PER_FRAME(4);
@@ -857,9 +875,17 @@ int FFmpegVideoDecoder::capabilities() const {
 #endif
 }
 
-int FFmpegVideoDecoder::decode(char* indata, int inlen) {
+int FFmpegVideoDecoder::decode(char* indata, int inlen, uint64_t hostPtsUs) {
     m_packet->data = (uint8_t*)indata;
     m_packet->size = inlen;
+#if defined(PLATFORM_SWITCH)
+    // Preserve the common-c RTP-derived host timestamp through decoder reorder
+    // and EAGAIN draining. Missing host PTS is synthesized by common-c itself.
+    m_packet->pts = static_cast<int64_t>(hostPtsUs);
+    m_packet->dts = AV_NOPTS_VALUE;
+#else
+    (void)hostPtsUs;
+#endif
 
 #if defined(_WIN32)
     (void) SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
@@ -981,6 +1007,9 @@ int FFmpegVideoDecoder::get_frame(bool native_frame, AVFrame** frame) {
         decodeFrame->hw_frames_ctx != nullptr ||
         (decodedFormat != nullptr &&
          (decodedFormat->flags & AV_PIX_FMT_FLAG_HWACCEL) != 0);
+    // Report the actual output format rather than inferring hardware use from
+    // successful device allocation. Read by the UI through atomic snapshots.
+    m_diagnostic_frame_format.store(decodeFrame->format);
 
     if (hardwareBackedFrame) {
 #if defined(BOREALIS_USE_DEKO3D) || defined(USE_METAL_RENDERER) || defined(PLATFORM_ANDROID)
