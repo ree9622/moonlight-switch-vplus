@@ -1,4 +1,22 @@
 {
+    "vplus": {
+        "title": "Foundation Sunshine controls",
+        "tab": "V+",
+        "bitrate": "Adjust live bitrate",
+        "commands": "Computer commands",
+        "refresh": "Refresh commands",
+        "loading": "Checking computer commands…",
+        "no_commands": "No commands are configured for this app. Live bitrate requires Foundation Sunshine.",
+        "ready": "Commands are configured on the computer. Live bitrate requires Foundation Sunshine.",
+        "load_failed": "Could not read computer commands. Check the connection, then refresh.",
+        "not_connected": "Connect and pair with this computer first.",
+        "failed": "The computer did not confirm the change. Check Foundation Sunshine and your connection. The request was not retried.",
+        "applying": "Waiting for the computer…",
+        "applied": "Bitrate applied. This value will also be used for the next stream.",
+        "confirm_command": "Run this command on the connected computer?",
+        "execute": "Run",
+        "command_accepted": "The computer accepted the command. Check its result on the computer."
+    },
     "about": {
         "about": "Moonlight-Switch is a third-party game streaming client based on Moonlight-Common-C for the Nintendo Switch",
         "link_gbatemp": "GbaTemp Page",

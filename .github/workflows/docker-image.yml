@@ -1,54 +1,56 @@
-name: Build Moonlight-Switch
+name: Build Moonlight V+ Switch
 
 on:
   workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install protocol test dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y libjansson-dev libexpat1-dev
+      - name: Test malformed responses and command isolation
+        run: |
+          cmake -S tests -B build/protocol-tests -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build/protocol-tests --parallel 2
+          ctest --test-dir build/protocol-tests --output-on-failure
 
   build:
-
+    needs: protocol
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 30
     container:
-      # image: docker://devkitpro/devkita64:20240120 // Before SDL broken audio
-      image: docker://devkitpro/devkita64:latest
-
+      image: devkitpro/devkita64:latest
     steps:
-    - name: Check out repository
-      uses: actions/checkout@v1
-      with:
-        submodules: recursive
-
-    - name: Remove useless fonts
-      run: rm -rf ./resources/font
-
-    - name: Remove enet
-      run: dkp-pacman --noconfirm -R switch-enet
-
-#    - name: Remove ffmpeg
-#      run: dkp-pacman --noconfirm -R switch-libmpv switch-ffmpeg
-
-    - name: Run cmake
-      continue-on-error: true
-      run: cmake -B build/switch -DCMAKE_BUILD_TYPE=Release -DPLATFORM_SWITCH=ON -DUSE_DEKO3D=ON
-    
-    - name: Dirty second cmake run
-      run: cmake -B build/switch -DCMAKE_BUILD_TYPE=Release -DPLATFORM_SWITCH=ON -DUSE_DEKO3D=ON
-
-    - name: Run build
-      run: make -C build/switch Moonlight.nro -j8
-
-    - name: Rename artifact 
-      run: mv build/switch/Moonlight.nro build/switch/Moonlight-Switch.nro
-
-    - name: Upload Moonlight-Switch.nro
-      uses: actions/upload-artifact@master
-      with:
-        name: Moonlight-Switch.nro
-        path: build/switch/Moonlight-Switch.nro
-
-    - name: Upload Moonlight-Switch.elf
-      uses: actions/upload-artifact@master
-      with:
-        name: Debug.elf
-        path: build/switch/Moonlight.elf
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+      - name: Build environment
+        run: |
+          dkp-pacman -Q devkitA64 libnx switch-ffmpeg
+          if dkp-pacman -Q switch-enet; then dkp-pacman --noconfirm -R switch-enet; fi
+      - name: Configure Switch build
+        run: cmake -B build/switch -DCMAKE_BUILD_TYPE=Release -DPLATFORM_SWITCH=ON -DUSE_DEKO3D=ON
+      - name: Build homebrew
+        run: cmake --build build/switch --target Moonlight.nro --parallel 4
+      - name: Package separate installation
+        run: |
+          mkdir -p dist/switch/Moonlight-Switch-VPlus
+          cp build/switch/Moonlight.nro dist/switch/Moonlight-Switch-VPlus/Moonlight-VPlus.nro
+          cp docs/VPLUS-SWITCH.md dist/README.md
+          cp LICENSE dist/LICENSE 2>/dev/null || cp LICENSE.txt dist/LICENSE
+          cd dist
+          sha256sum switch/Moonlight-Switch-VPlus/Moonlight-VPlus.nro > SHA256SUMS
+      - name: Upload installation and debug symbols
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Moonlight-VPlus-Switch
+          path: |
+            dist/
+            build/switch/Moonlight.elf
+          retention-days: 30

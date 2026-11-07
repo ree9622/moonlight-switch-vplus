@@ -14,22 +14,27 @@ jobs:
     uses: ./.github/workflows/docker-image.yml
 
   psvita:
+    if: github.repository != 'ree9622/moonlight-switch-vplus'
     name: PS Vita
     uses: ./.github/workflows/psvita.yml
 
   android:
+    if: github.repository != 'ree9622/moonlight-switch-vplus'
     name: Android
     uses: ./.github/workflows/android-apk.yml
     secrets: inherit
 
   macos:
+    if: github.repository != 'ree9622/moonlight-switch-vplus'
     name: macOS
     uses: ./.github/workflows/macos.yml
 
   windows:
+    if: github.repository != 'ree9622/moonlight-switch-vplus'
     name: Windows
     uses: ./.github/workflows/windows.yml
 
   linux:
+    if: github.repository != 'ree9622/moonlight-switch-vplus'
     name: Linux
     uses: ./.github/workflows/linux.yml

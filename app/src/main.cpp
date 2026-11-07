@@ -134,7 +134,7 @@ int main(int argc, char* argv[]) {
 
     brls::Application::createWindow("title"_i18n);
 
-    auto home = Application::getPlatform()->getHomeDirectory("Moonlight-Switch");
+    auto home = Application::getPlatform()->getHomeDirectory("Moonlight-Switch-VPlus");
     Settings::instance().set_working_dir(home);
     Settings::instance().set_launch_path(argc > 0 ? argv[0] : "");
     brls::Logger::info("Working dir, {}", home);

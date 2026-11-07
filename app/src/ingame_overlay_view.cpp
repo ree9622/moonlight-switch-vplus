@@ -14,6 +14,7 @@
 #include "streaming_input_overlay.hpp"
 #include "button_selecting_dialog.hpp"
 #include "UpscalingSupport.hpp"
+#include "foundation_tab.hpp"
 
 #include <cmath>
 #include <iomanip>
@@ -74,6 +75,9 @@ IngameOverlay::IngameOverlay(StreamingView* streamView)
         "LogoutTab", [streamView]() { return new LogoutTab(streamView); });
     brls::Application::registerXMLView(
         "OptionsTab", [streamView]() { return new OptionsTab(streamView); });
+    brls::Application::registerXMLView("FoundationTab", [streamView]() {
+        return new FoundationTab(streamView->getHost(), streamView->getApp().app_id);
+    });
 
     this->inflateFromXMLRes("xml/views/ingame_overlay/overlay.xml");
 
