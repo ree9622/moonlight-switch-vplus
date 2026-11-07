@@ -1,5 +1,6 @@
 {
     "vplus": {
+        "in_progress": "Another request is still pending. Wait for its result before sending another.",
         "title": "Foundation Sunshine controls",
         "tab": "V+",
         "bitrate": "Adjust live bitrate",

@@ -6,6 +6,7 @@
 #include "foundation_protocol.hpp"
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -107,6 +108,7 @@ class GameStreamClient : public Singleton<GameStreamClient> {
   private:
     void foundation_action(const Host& host, const std::string& path,
                            const std::string& query, ServerCallback<bool>& callback);
+    std::set<std::string> m_foundation_inflight;
     template <typename T, typename Worker>
     void with_cached_server_data(const std::string& address,
                                  const std::string& missingError,

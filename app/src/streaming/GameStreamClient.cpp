@@ -801,16 +801,21 @@ void GameStreamClient::foundation_action(const Host& host, const std::string& pa
         callback(GSResult<bool>::failure("vplus/not_connected"_i18n));
         return;
     }
+    if (!m_foundation_inflight.insert(address).second) {
+        callback(GSResult<bool>::failure("vplus/in_progress"_i18n));
+        return;
+    }
     // Copy the endpoint on the UI thread. Workers never mutate the host cache.
     const auto url = foundation_url(it->second, path) + "&" + query;
-    brls::async([url, path, callback] {
+    brls::async([this, address, url, path, callback] {
         Data data;
         std::string error;
         bool ok = http_request_control(url, &data, error) == GS_OK;
         if (ok)
             ok = foundation::parseActionResponse(
                 std::string(reinterpret_cast<const char*>(data.bytes()), data.size()), path, error);
-        brls::sync([ok, error, callback] {
+        brls::sync([this, address, ok, error, callback] {
+            m_foundation_inflight.erase(address);
             callback(ok ? GSResult<bool>::success(true) : GSResult<bool>::failure(error));
         });
     });
@@ -821,7 +826,16 @@ void GameStreamClient::foundation_set_bitrate(const Host& host, int kbps, Server
         callback(GSResult<bool>::failure("Invalid bitrate"));
         return;
     }
-    foundation_action(host, "bitrate", "bitrate=" + std::to_string(kbps), callback);
+    foundation_action(host, "bitrate", "bitrate=" + std::to_string(kbps),
+        [kbps, callback](GSResult<bool> result) {
+            // A tab can disappear while the request is in flight. Preserve the
+            // acknowledged setting independently of the view's lifetime.
+            if (result.isSuccess()) {
+                Settings::instance().set_bitrate(kbps);
+                Settings::instance().save();
+            }
+            callback(result);
+        });
 }
 
 void GameStreamClient::foundation_command(const Host& host, const std::string& id,

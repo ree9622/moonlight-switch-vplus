@@ -336,7 +336,7 @@ class Settings : public Singleton<Settings> {
     int m_resolution = 720;
     int m_native_resolution_scale = 100;
     int m_fps = 60;
-#ifdef __PSV__
+#if defined(__PSV__) || defined(__SWITCH__)
     VideoCodec m_video_codec = H264;
 #else
     VideoCodec m_video_codec = H265;

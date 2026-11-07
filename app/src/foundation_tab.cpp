@@ -66,9 +66,6 @@ void FoundationTab::chooseBitrate() {
                     if (!*life) return;
                     setBusy(false);
                     if (!result.isSuccess()) { showFailure(result.error()); return; }
-                    // Save only after the host explicitly acknowledges the change.
-                    Settings::instance().set_bitrate(rate);
-                    Settings::instance().save();
                     bitrate->setDetailText(std::to_string(rate / 1000) + " Mbps");
                     status->setText("vplus/applied"_i18n);
                 });
