@@ -437,14 +437,17 @@ void MoonlightSession::draw(NVGcontext* vg, int width, int height) {
                 fmt::format("session={} t_ms={} mode={}x{}@{} requested_kbps={} codec={} frame={} hardware={} "
                             "received_fps={:.2f} decoded_fps={:.2f} rendered_fps={:.2f} decode_ms={:.2f} "
                             "decoder_delay_ms={:.2f} network_drops={} rtt_ms={} rtt_variance_ms={} "
-                            "queue={} reserve={} capacity={}",
+                            "queue={} reserve={} capacity={} render_ms={:.2f} post_ms={:.2f} rcas_ms={:.2f} "
+                            "post_frames={} rcas_requested={}",
                     connection_generation(), now, m_config.width, m_config.height, m_config.fps, m_config.bitrate,
                     decoder.codec, decoder.pixelFormat, decoder.frameReceived ? (decoder.hardwareFrame ? "yes" : "no") : "pending",
                     video.current_received_fps, video.current_decoded_fps, render.rendered_fps,
                     video.current_decoding_time, video.current_decoder_delay, video.network_dropped_frames,
                     hasRtt ? std::to_string(rtt) : "unknown", hasRtt ? std::to_string(variance) : "unknown",
                     AVFrameHolder::instance().getFrameQueueSize(), AVFrameHolder::instance().getFrameQueueTargetDepth(),
-                    AVFrameHolder::instance().getFrameQueueCapacity()));
+                    AVFrameHolder::instance().getFrameQueueCapacity(), render.rendering_time,
+                    render.post_processing_time, render.sharpening_time, render.post_processed_frames,
+                    Settings::instance().rcas() ? "yes" : "no"));
             m_last_diagnostics_sample_ms = now;
             m_last_diagnostics_generation = connection_generation();
         }

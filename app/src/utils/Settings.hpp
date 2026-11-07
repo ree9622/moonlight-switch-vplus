@@ -351,7 +351,7 @@ class Settings : public Singleton<Settings> {
     UpscalingMode m_upscaling_mode = UPSCALING_OFF;
     bool m_enable_dithering = false;
     int m_dithering_strength = 3;
-    bool m_enable_rcas = true;
+    bool m_enable_rcas = false;
     int m_rcas_strength = 20;
     bool m_click_by_tap = false;
     int m_decoder_threads = 4;
