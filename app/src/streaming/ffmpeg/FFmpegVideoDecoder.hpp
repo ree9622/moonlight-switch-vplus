@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include "VideoStatsWindow.hpp"
 
 #if defined(PLATFORM_ANDROID)
 #include <vector>
@@ -74,7 +75,8 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
 
     VideoDecodeStats m_video_decode_stats_progress = {};
     VideoDecodeStats m_video_decode_stats_cache = {};
-    uint64_t timeCount = 0;
+    video_stats::FrameRateWindow m_frame_rate_window;
+    void publish_decode_stats(uint64_t now);
 
     char* m_ffmpeg_buffer = nullptr;
   #if defined(PLATFORM_ANDROID)
