@@ -32,7 +32,7 @@
         "thanks_5": " Everyone involved into app development",
         "thanks_6": " You, for using my homebrew!",
         "title": "About",
-        "version": "Moonlight-Switch v{} by XITRIX"
+        "version": "Moonlight V+ Switch 0.1.0 · Moonlight-Switch v{}"
     },
     "add_host": {
         "connect": "Connect",
@@ -213,5 +213,5 @@
         "favorites": "Favorites",
         "settings": "Settings"
     },
-    "title": "Moonlight"
+    "title": "Moonlight V+ Switch"
 }

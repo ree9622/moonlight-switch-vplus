@@ -32,7 +32,7 @@
         "thanks_5": " 앱 개발에 참여한 모든 사람",
         "thanks_6": " 홈브류를 사용해 주셔서 감사합니다!",
         "title": "정보",
-        "version": "XITRIX의 Moonlight-Switch v{}"
+        "version": "문라이트 브이플러스 스위치 0.1.0 · 원본 버전 {}"
     },
     "add_host": {
         "connect": "연결",
@@ -213,5 +213,5 @@
         "favorites": "즐겨찾기",
         "settings": "설정"
     },
-    "title": "달빛"
+    "title": "문라이트 브이플러스 스위치"
 }

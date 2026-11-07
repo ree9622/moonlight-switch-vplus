@@ -55,7 +55,9 @@ void FoundationTab::chooseBitrate() {
     int selected = 0;
     const auto current = std::find(rates.begin(), rates.end(), Settings::instance().bitrate());
     if (current != rates.end()) selected = static_cast<int>(current - rates.begin());
-    auto* dropdown = new Dropdown("vplus/bitrate"_i18n, labels,
+    // Dropdown closes itself after its selection callback. Start the request
+    // only after dismissal so a synchronous error cannot pop the error dialog.
+    auto* dropdown = new Dropdown("vplus/bitrate"_i18n, labels, [](int) {}, selected,
         [this, life = alive, rates](int index) {
             if (!*life || index < 0 || static_cast<size_t>(index) >= rates.size() || busy) return;
             setBusy(true);
@@ -69,7 +71,7 @@ void FoundationTab::chooseBitrate() {
                     bitrate->setDetailText(std::to_string(rate / 1000) + " Mbps");
                     status->setText("vplus/applied"_i18n);
                 });
-        }, selected);
+        });
     Application::pushActivity(new Activity(dropdown));
 }
 
@@ -78,7 +80,7 @@ void FoundationTab::chooseCommand() {
     std::vector<std::string> labels;
     for (const auto& item : commands) labels.push_back(item.name);
     const auto snapshot = commands;
-    auto* dropdown = new Dropdown("vplus/commands"_i18n, labels,
+    auto* dropdown = new Dropdown("vplus/commands"_i18n, labels, [](int) {}, 0,
         [this, life = alive, snapshot](int index) {
             if (!*life || index < 0 || static_cast<size_t>(index) >= snapshot.size() || busy) return;
             const auto selected = snapshot[index];

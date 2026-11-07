@@ -75,8 +75,8 @@ IngameOverlay::IngameOverlay(StreamingView* streamView)
         "LogoutTab", [streamView]() { return new LogoutTab(streamView); });
     brls::Application::registerXMLView(
         "OptionsTab", [streamView]() { return new OptionsTab(streamView); });
-    brls::Application::registerXMLView("FoundationTab", [streamView]() {
-        return new FoundationTab(streamView->getHost(), streamView->getApp().app_id);
+    brls::Application::registerXMLView("FoundationTab", [host = streamView->getHost(), appId = streamView->getApp().app_id]() {
+        return new FoundationTab(host, appId);
     });
 
     this->inflateFromXMLRes("xml/views/ingame_overlay/overlay.xml");
