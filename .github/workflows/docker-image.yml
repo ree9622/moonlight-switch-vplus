@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     container:
-      image: devkitpro/devkita64:latest
+      image: devkitpro/devkita64@sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Fetch Switch dependencies
@@ -35,7 +35,7 @@ jobs:
           dkp-pacman -Q devkitA64 libnx switch-ffmpeg
           if dkp-pacman -Q switch-enet; then dkp-pacman --noconfirm -R switch-enet; fi
       - name: Configure Switch build
-        run: cmake -B build/switch -DCMAKE_BUILD_TYPE=Release -DPLATFORM_SWITCH=ON -DUSE_DEKO3D=ON
+        run: cmake -B build/switch -DCMAKE_BUILD_TYPE=Release -DPLATFORM_SWITCH=ON -DUSE_DEKO3D=ON -DVPLUS_BUILD_ID=${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build homebrew
         run: cmake --build build/switch --target Moonlight.nro --parallel 4
       - name: Package separate installation

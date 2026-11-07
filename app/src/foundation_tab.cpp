@@ -10,9 +10,12 @@ FoundationTab::FoundationTab(const Host& host, int appId) : host(host), appId(ap
     inflateFromXMLRes("xml/views/ingame_overlay/foundation_tab.xml");
     bitrate->setText("vplus/bitrate"_i18n);
     bitrate->setDetailText(fmt::format("{:.1f} Mbps", Settings::instance().bitrate() / 1000.0));
+    frameBuffer->setText("vplus/frame_buffer"_i18n);
+    frameBuffer->setDetailText(std::to_string(Settings::instance().frames_queue_size()));
     command->setText("vplus/commands"_i18n);
     refresh->setText("vplus/refresh"_i18n);
     bitrate->registerClickAction([this](View*) { if (!busy) chooseBitrate(); return true; });
+    frameBuffer->registerClickAction([this](View*) { if (!busy) chooseFrameBuffer(); return true; });
     command->registerClickAction([this](View*) { if (!busy) chooseCommand(); return true; });
     refresh->registerClickAction([this](View*) { if (!busy) loadCommands(); return true; });
     loadCommands();
@@ -21,6 +24,7 @@ FoundationTab::FoundationTab(const Host& host, int appId) : host(host), appId(ap
 void FoundationTab::setBusy(bool value) {
     busy = value;
     bitrate->setActionAvailable(BUTTON_A, !value);
+    frameBuffer->setActionAvailable(BUTTON_A, !value);
     command->setActionAvailable(BUTTON_A, !value && !commands.empty());
     refresh->setActionAvailable(BUTTON_A, !value);
 }
@@ -91,6 +95,21 @@ void FoundationTab::chooseCommand() {
                 if (*life && !busy) executeCommand(selected);
             });
             dialog->open();
+        });
+    Application::pushActivity(new Activity(dropdown));
+}
+
+void FoundationTab::chooseFrameBuffer() {
+    const std::vector<std::string> choices = {"vplus/buffer_low"_i18n, "vplus/buffer_balanced"_i18n,
+                                             "vplus/buffer_smooth"_i18n};
+    const int selected = std::clamp(Settings::instance().frames_queue_size(), 1, 3) - 1;
+    auto* dropdown = new Dropdown("vplus/frame_buffer"_i18n, choices, [](int) {}, selected,
+        [this, life = alive](int index) {
+            if (!*life || index < 0 || index > 2 || busy) return;
+            Settings::instance().set_frames_queue_size(index + 1);
+            Settings::instance().save();
+            frameBuffer->setDetailText(std::to_string(index + 1));
+            status->setText("vplus/buffer_saved"_i18n);
         });
     Application::pushActivity(new Activity(dropdown));
 }

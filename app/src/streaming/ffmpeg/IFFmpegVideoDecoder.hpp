@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Limelight.h>
+#include <string>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -36,6 +37,13 @@ struct VideoDecodeStats {
     uint64_t measurement_start_timestamp;
 };
 
+struct VideoDecoderDiagnostics {
+    std::string codec = "unknown";
+    std::string pixelFormat = "pending";
+    bool frameReceived = false;
+    bool hardwareFrame = false;
+};
+
 class IFFmpegVideoDecoder {
   public:
     virtual ~IFFmpegVideoDecoder()= default;
@@ -47,4 +55,5 @@ class IFFmpegVideoDecoder {
     virtual int submit_decode_unit(PDECODE_UNIT decode_unit) = 0;
     virtual int capabilities() const = 0;
     virtual VideoDecodeStats* video_decode_stats() = 0;
+    virtual VideoDecoderDiagnostics diagnostics() const { return {}; }
 };

@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 
 #if defined(PLATFORM_ANDROID)
 #include <vector>
@@ -20,6 +21,7 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
     int submit_decode_unit(PDECODE_UNIT decode_unit) override;
     int capabilities() const override;
     VideoDecodeStats* video_decode_stats() override;
+    VideoDecoderDiagnostics diagnostics() const override;
 
   private:
     int decode(char* indata, int inlen);
@@ -58,6 +60,8 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
     AVCodecID m_codec_id = AV_CODEC_ID_NONE;
 
     bool m_hw_decode_active = false;
+    std::atomic<int> m_diagnostic_codec{AV_CODEC_ID_NONE};
+    std::atomic<int> m_diagnostic_frame_format{AV_PIX_FMT_NONE};
     bool m_using_android_mediacodec_decoder = false;
     bool m_supports_slice_threading = false;
     bool m_use_decoder_threads = false;

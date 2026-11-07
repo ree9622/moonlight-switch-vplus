@@ -8,6 +8,7 @@
             <brls:Header title="@i18n/vplus/title"/>
             <brls:Label id="vplus_status" text="@i18n/vplus/loading" marginBottom="24"/>
             <brls:DetailCell id="vplus_bitrate"/>
+            <brls:DetailCell id="vplus_frame_buffer"/>
             <brls:DetailCell id="vplus_command"/>
             <brls:DetailCell id="vplus_refresh"/>
         </brls:Box>

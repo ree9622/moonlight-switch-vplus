@@ -4,6 +4,7 @@
 #include "InputManager.hpp"
 #include "Settings.hpp"
 #include "borealis.hpp"
+#include "ClientDiagnostics.hpp"
 #include <string.h>
 
 #if defined(PLATFORM_IOS) || defined(PLATFORM_VISIONOS)
@@ -85,6 +86,7 @@ void MoonlightSession::connection_started() {
         return;
 
     m_active_session->m_stop_requested = false;
+    m_active_session->m_connection_generation.fetch_add(1);
     m_active_session->m_is_active = true;
 }
 
@@ -93,6 +95,8 @@ void MoonlightSession::connection_terminated(int error_code) {
 
     if (!m_active_session)
         return;
+
+    m_active_session->m_is_active = false;
 
     if (m_active_session->m_stop_requested) {
         brls::Logger::info("MoonlightSession: Termination acknowledged after stop request");
@@ -374,6 +378,7 @@ void MoonlightSession::stop(int terminate_app) {
         return;
 
     m_stop_requested = true;
+    m_is_active = false;
 
     if (terminate_app) {
         GameStreamClient::instance().quit(m_address, [](auto _) {});
@@ -413,5 +418,29 @@ void MoonlightSession::draw(NVGcontext* vg, int width, int height) {
                 *m_video_renderer->video_render_stats();
             m_last_stats_update_ms = now;
         }
+#ifdef PLATFORM_SWITCH
+        if (is_active() && (m_last_diagnostics_generation != connection_generation() ||
+            m_last_diagnostics_sample_ms == 0 || now - m_last_diagnostics_sample_ms >= 5000)) {
+            const auto decoder = decoder_diagnostics();
+            uint32_t rtt = 0, variance = 0;
+            const bool hasRtt = LiGetEstimatedRttInfo(&rtt, &variance);
+            const auto& video = m_session_stats.video_decode_stats;
+            const auto& render = m_session_stats.video_render_stats;
+            writeClientDiagnostics(Settings::instance().working_dir(),
+                fmt::format("session={} t_ms={} mode={}x{}@{} requested_kbps={} codec={} frame={} hardware={} "
+                            "received_fps={:.2f} decoded_fps={:.2f} rendered_fps={:.2f} decode_ms={:.2f} "
+                            "decoder_delay_ms={:.2f} network_drops={} rtt_ms={} rtt_variance_ms={} "
+                            "queue={} reserve={} capacity={}",
+                    connection_generation(), now, m_config.width, m_config.height, m_config.fps, m_config.bitrate,
+                    decoder.codec, decoder.pixelFormat, decoder.frameReceived ? (decoder.hardwareFrame ? "yes" : "no") : "pending",
+                    video.current_received_fps, video.current_decoded_fps, render.rendered_fps,
+                    video.current_decoding_time, video.current_decoder_delay, video.network_dropped_frames,
+                    hasRtt ? std::to_string(rtt) : "unknown", hasRtt ? std::to_string(variance) : "unknown",
+                    AVFrameHolder::instance().getFrameQueueSize(), AVFrameHolder::instance().getFrameQueueTargetDepth(),
+                    AVFrameHolder::instance().getFrameQueueCapacity()));
+            m_last_diagnostics_sample_ms = now;
+            m_last_diagnostics_generation = connection_generation();
+        }
+#endif
     }
 }

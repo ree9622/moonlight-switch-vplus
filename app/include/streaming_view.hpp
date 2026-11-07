@@ -50,6 +50,10 @@ class StreamingView : public brls::Box {
     int touchScrollCounter = 0;
     size_t bottombarDelayTask = -1;
     bool m_use_hdr = false;
+    bool input_session_started = false;
+    uint64_t input_session_generation = 0;
+    uint64_t statistics_updated_ms = 0;
+    std::string statistics_cache;
     TwoFingerScrollGestureRecognizer* scrollTouchRecognizer = nullptr;
 
     void handleInput();

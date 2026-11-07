@@ -1,5 +1,10 @@
 {
     "vplus": {
+        "frame_buffer": "Video buffer (next connection)",
+        "buffer_low": "1 — lower latency",
+        "buffer_balanced": "2 — balanced",
+        "buffer_smooth": "3 — more jitter protection",
+        "buffer_saved": "Video buffer saved. Disconnect and reconnect to apply; lower buffering can increase stutter on unstable Wi-Fi.",
         "in_progress": "Another request is still pending. Wait for its result before sending another.",
         "title": "Host controls",
         "tab": "V+",
@@ -32,7 +37,7 @@
         "thanks_5": " Everyone involved into app development",
         "thanks_6": " You, for using my homebrew!",
         "title": "About",
-        "version": "Moonlight V+ Switch 0.1.0 · Moonlight-Switch v{}"
+        "version": "Moonlight V+ Switch 0.1.1 · Moonlight-Switch v{}"
     },
     "add_host": {
         "connect": "Connect",

@@ -3,6 +3,7 @@
 #include "GameStreamClient.hpp"
 #include "MoonlightSessionDecoderAndRenderProvider.hpp"
 #include <nanovg.h>
+#include <atomic>
 
 struct SessionStats {
     VideoDecodeStats video_decode_stats;
@@ -29,6 +30,8 @@ class MoonlightSession {
 
     bool is_active() const { return m_is_active; }
     bool is_terminated() const { return m_is_terminated; }
+    uint64_t connection_generation() const { return m_connection_generation.load(); }
+    VideoDecoderDiagnostics decoder_diagnostics() const { return m_video_decoder->diagnostics(); }
 
     bool connection_status_is_poor() const {
         return m_connection_status_is_poor;
@@ -81,12 +84,15 @@ class MoonlightSession {
     IVideoRenderer* m_video_renderer = nullptr;
     IAudioRenderer* m_audio_renderer = nullptr;
 
-    bool m_is_active = false;
-    bool m_is_terminated = false;
-    bool m_stop_requested = false;
+    std::atomic<bool> m_is_active{false};
+    std::atomic<bool> m_is_terminated{false};
+    std::atomic<bool> m_stop_requested{false};
+    std::atomic<uint64_t> m_connection_generation{0};
     bool m_connection_status_is_poor = false;
     bool m_use_hdr = false;
 
     SessionStats m_session_stats = {};
     uint64_t m_last_stats_update_ms = 0;
+    uint64_t m_last_diagnostics_sample_ms = 0;
+    uint64_t m_last_diagnostics_generation = 0;
 };

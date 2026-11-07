@@ -41,7 +41,7 @@ MoonlightInputManager::MoonlightInputManager() {
     inputManager
         ->getMouseCusorOffsetChanged()
         ->subscribe([this](brls::Point offset) {
-            if (!inputEnabled) return;
+            if (!inputEnabled || !isSessionCurrent()) return;
 
             if (offset.x != 0 || offset.y != 0) {
                 float multiplier =
@@ -59,14 +59,14 @@ MoonlightInputManager::MoonlightInputManager() {
     inputManager
         ->getMouseScrollOffsetChanged()
         ->subscribe([this](brls::Point scroll) {
-            if (!inputEnabled) return;
+            if (!inputEnabled || !isSessionCurrent()) return;
             handleDesktopMouseScroll(scroll);
         });
 
     inputManager
         ->getKeyboardKeyStateChanged()
         ->subscribe([this](brls::KeyState state) {
-            if (!inputEnabled) return;
+            if (!inputEnabled || !isSessionCurrent()) return;
 
             int vkKey = MoonlightInputManager::glfwKeyToVKKey(state.key);
             char modifiers = state.mods;
@@ -78,7 +78,10 @@ MoonlightInputManager::MoonlightInputManager() {
     inputManager
         ->getControllerSensorStateChanged()
         ->subscribe([this](brls::SensorEvent event) {
-            if (!inputEnabled) return;
+            if (!inputEnabled || !isSessionCurrent()) return;
+            ensureControllerRegistrations();
+            if (event.controllerIndex < 0 ||
+                !inputSession.canSendController(static_cast<unsigned>(event.controllerIndex))) return;
             
             switch (event.type) {
                 case brls::SensorEventType::ACCEL:
@@ -249,7 +252,7 @@ void MoonlightInputManager::handleRumbleTriggers(uint16_t controllerNumber,
 }
 
 void MoonlightInputManager::dropInput() {
-    if (inputDropped)
+    if (!isSessionCurrent() || inputDropped)
         return;
 
     desktopMouseRemainder = {0, 0};
@@ -258,35 +261,33 @@ void MoonlightInputManager::dropInput() {
     pendingHorizontalScrollEvents = 0;
     desktopScrollAxis = DesktopScrollAxis::None;
     lastDesktopScrollEvent = {};
+    panStatus.reset();
 
     bool res = true;
     // Drop gamepad state
     GamepadState gamepadState;
-    auto controllersCount = brls::Application::getPlatform()
-                            ->getInputManager()
-                            ->getControllersConnectedCount();
-
-    if (controllersCount > GAMEPADS_MAX) {
-        brls::Logger::warning("Clamping controller count from {} to {} while dropping input", controllersCount, GAMEPADS_MAX);
-        controllersCount = GAMEPADS_MAX;
-    }
-
-    for (short i = 0; i < controllersCount; i++) {
-        res &= LiSendMultiControllerEvent(
-                   i, controllersToMap(), gamepadState.buttonFlags,
+    for (short i = 0; i < GAMEPADS_MAX; i++) {
+        // Focus can be lost while a connection is starting. Never send neutral
+        // states for controllers that have not arrived in this session.
+        if (!inputSession.canSendController(i)) continue;
+        const bool sent = LiSendMultiControllerEvent(
+                   i, inputSession.connectedMask(), gamepadState.buttonFlags,
                    gamepadState.leftTrigger, gamepadState.rightTrigger,
                    gamepadState.leftStickX, gamepadState.leftStickY,
                    gamepadState.rightStickX, gamepadState.rightStickY) == 0;
+        if (sent) lastGamepadStates[i] = gamepadState;
+        res &= sent;
     }
 
     // Drop touchscreen mouse state
     LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE,BUTTON_MOUSE_LEFT);
+    if (lastMouseState.m_pressed) LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_MOUSE_MIDDLE);
+    if (lastMouseState.l_pressed || lastMouseState.r_pressed)
+        LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_MOUSE_RIGHT);
+    lastMouseState = {};
 
     // Drop touchscreen state
-    for (auto id: activeTouchIDs) {
-        LiSendTouchEvent(LI_TOUCH_EVENT_CANCEL, id.first, 0, 0, 0, 0, 0, LI_ROT_UNKNOWN);
-    }
-    activeTouchIDs.clear();
+    res &= cancelTouches();
 
     // Drop keyboard state
     for (int i = BRLS_KBD_KEY_SPACE; i < BrlsKeyboardScancode::BRLS_KBD_KEY_LAST; i++)  {
@@ -295,6 +296,36 @@ void MoonlightInputManager::dropInput() {
     }
 
     inputDropped = res;
+}
+
+bool MoonlightInputManager::isSessionCurrent() const {
+    const auto* session = MoonlightSession::activeSession();
+    return session && inputSession.current(session->is_active(), session->connection_generation());
+}
+
+void MoonlightInputManager::beginInputSession(uint64_t generation) {
+    inputSession.begin(generation);
+    std::fill_n(lastGamepadStates, GAMEPADS_MAX, GamepadState{});
+    std::fill_n(rumbleCache, GAMEPADS_MAX, RumbleValues{});
+    lastMouseState = {};
+    fallbackTouchId.reset();
+    panStatus.reset();
+    desktopMouseRemainder = {0, 0};
+    desktopScrollRemainder = {0, 0};
+    pendingHorizontalScroll = 0;
+    pendingHorizontalScrollEvents = 0;
+    desktopScrollAxis = DesktopScrollAxis::None;
+    lastDesktopScrollEvent = {};
+    inputDropped = false;
+    ensureControllerRegistrations();
+}
+
+void MoonlightInputManager::endInputSession() {
+    inputSession.end();
+    fallbackTouchId.reset();
+    panStatus.reset();
+    lastMouseState = {};
+    inputDropped = false;
 }
 
 GamepadState MoonlightInputManager::getControllerState(int controllerNum,
@@ -404,46 +435,49 @@ GamepadState MoonlightInputManager::getControllerState(int controllerNum,
     return gamepadState;
 }
 
-void MoonlightInputManager::handleControllers(bool specialKey) {
-    static int lastControllerCount = 0;
-
-    auto controllersCount = brls::Application::getPlatform()
-                            ->getInputManager()
-                            ->getControllersConnectedCount();
-
-    if (controllersCount > GAMEPADS_MAX) {
-        brls::Logger::warning("Clamping controller count from {} to {} while handling input", controllersCount, GAMEPADS_MAX);
-        controllersCount = GAMEPADS_MAX;
+void MoonlightInputManager::ensureControllerRegistrations() {
+    if (!isSessionCurrent()) return;
+    const int count = std::clamp<int>(brls::Application::getPlatform()
+        ->getInputManager()->getControllersConnectedCount(), 0, std::min(GAMEPADS_MAX, 16));
+    const uint16_t nextMask = InputSessionState::maskForCount(count);
+    inputSession.setControllerCount(count);
+    const uint16_t removed = inputSession.pendingRemovals();
+    // A mask change must also reach the host when no button changed.
+    for (int i = 0; i < GAMEPADS_MAX; ++i) {
+        if (!(removed & (1u << i))) continue;
+        if (LiSendMultiControllerEvent(i, nextMask, 0, 0, 0, 0, 0, 0, 0) == 0) {
+            inputSession.markRemoved(i);
+            lastGamepadStates[i] = {};
+        }
     }
-
-    short mappedControllersCount = controllersToMap();
-
-    for (int i = 0; i < controllersCount; i++) {
-        GamepadState gamepadState = getControllerState(i, specialKey);
-
-        if (!gamepadState.is_equal(lastGamepadStates[i])) {
-            lastGamepadStates[i] = gamepadState;
-
-            if (lastControllerCount != controllersCount) {
-                lastControllerCount = controllersCount;
-                
-                for (int i = 0; i < controllersCount; i++) {
-                    Logger::debug("StreamingView: send features message for controller #{}", i);
-                    LiSendControllerArrivalEvent(i, mappedControllersCount, LI_CTYPE_UNKNOWN, 0, LI_CCAP_RUMBLE | LI_CCAP_ACCEL | LI_CCAP_GYRO);
-                }
-            }
-
-            if (LiSendMultiControllerEvent(
-                    i, mappedControllersCount, gamepadState.buttonFlags,
-                    gamepadState.leftTrigger, gamepadState.rightTrigger,
-                    gamepadState.leftStickX, gamepadState.leftStickY,
-                    gamepadState.rightStickX, gamepadState.rightStickY) != 0)
-                brls::Logger::info("StreamingView: error sending input data");
+    for (int i = 0; i < count; ++i) {
+        if (!inputSession.needsArrival(i)) continue;
+        if (LiSendControllerArrivalEvent(i, nextMask, LI_CTYPE_UNKNOWN, 0,
+                LI_CCAP_RUMBLE | LI_CCAP_ACCEL | LI_CCAP_GYRO) == 0) {
+            inputSession.markArrived(i);
+            Logger::info("Input: controller #{} arrived for this session (mask {})", i, nextMask);
         }
     }
 }
 
+void MoonlightInputManager::handleControllers(bool specialKey) {
+    ensureControllerRegistrations();
+    for (int i = 0; i < GAMEPADS_MAX; ++i) {
+        if (!inputSession.canSendController(i)) continue;
+        GamepadState gamepadState = getControllerState(i, specialKey);
+        if (!inputSession.needsInitialState(i) && gamepadState.is_equal(lastGamepadStates[i])) continue;
+        if (LiSendMultiControllerEvent(i, inputSession.connectedMask(), gamepadState.buttonFlags,
+                gamepadState.leftTrigger, gamepadState.rightTrigger,
+                gamepadState.leftStickX, gamepadState.leftStickY,
+                gamepadState.rightStickX, gamepadState.rightStickY) == 0) {
+            lastGamepadStates[i] = gamepadState;
+            inputSession.markStateSent(i);
+        } else Logger::info("StreamingView: error sending input data");
+    }
+}
+
 void MoonlightInputManager::handleInput(bool ignoreTouch) {
+    if (!inputEnabled || !isSessionCurrent()) return;
     inputDropped = false;
     static brls::ControllerState rawController;
     static brls::ControllerState controller;
@@ -472,8 +506,6 @@ void MoonlightInputManager::handleInput(bool ignoreTouch) {
                 applyStickScrollDeadzone(controller.axes[brls::RIGHT_Y],
                                          Settings::instance().get_deadzone_stick_right());
     }
-
-    static MouseStateS lastMouseState;
 
     MouseStateS mouseState;
     if (!Settings::instance().touchscreen_mouse_mode()) {
@@ -537,9 +569,11 @@ void MoonlightInputManager::handleInput(bool ignoreTouch) {
         LiSendScrollEvent(mouseState.scroll_y > 0 ? 1 : -1);
     }
 
+    // Keyboard/menu touches must not leak into the stream in either touch mode.
+    if (ignoreTouch || !Settings::instance().touchscreen_mouse_mode()) cancelTouches();
+    if (ignoreTouch) return;
+
     if (!Settings::instance().touchscreen_mouse_mode()) {
-        // Do not process touch events, useful if onscreen keyboard is presented
-        if (ignoreTouch) { return; }
 
         if (panStatus.has_value()) {
             float multiplier =
@@ -550,68 +584,74 @@ void MoonlightInputManager::handleInput(bool ignoreTouch) {
             panStatus.reset();
         }
     } else {
-        uint8_t eventType;
-
         auto touches = brls::Application::currentTouchState;
-        for (int i = 0; i < touches.size(); i++) {
-            auto touch = touches[i];
-            if (touch.view && touch.view->hasParent() && dynamic_cast<StreamingView*>(touch.view->getParent()) == nullptr) return;
-
+        for (const auto& touch : touches) {
+            bool inStream = touch.view == nullptr;
+            for (auto* view = touch.view; view; view = view->hasParent() ? view->getParent() : nullptr) {
+                if (dynamic_cast<StreamingView*>(view)) { inStream = true; break; }
+            }
+            if (!inStream) {
+                if (inputSession.activeTouches().count(touch.fingerId) &&
+                    sendTouch(touch.fingerId, InputSessionState::TouchAction::Cancel, {}))
+                    inputSession.markTouchSent(touch.fingerId, InputSessionState::TouchAction::Cancel);
+                continue;
+            }
+            InputSessionState::TouchPhase phase = InputSessionState::TouchPhase::None;
             switch (touch.phase) {
-                case TouchPhase::START:
-                    eventType = LI_TOUCH_EVENT_DOWN;
-                    break;
-                case TouchPhase::STAY:
-                    eventType = LI_TOUCH_EVENT_MOVE;
-                    break;
-                case TouchPhase::END:
-                    eventType = LI_TOUCH_EVENT_UP;
-                    break;
-                case TouchPhase::NONE:
-                    eventType = LI_TOUCH_EVENT_CANCEL;
-                    break;
+                case TouchPhase::START: phase = InputSessionState::TouchPhase::Start; break;
+                case TouchPhase::STAY: phase = InputSessionState::TouchPhase::Move; break;
+                case TouchPhase::END: phase = InputSessionState::TouchPhase::End; break;
+                case TouchPhase::NONE: break;
             }
-
-            if (touch.phase != TouchPhase::NONE) {
-                activeTouchIDs.insert(std::pair(touch.fingerId, true));
-            } else {
-                activeTouchIDs.erase(touch.fingerId);
-            }
-
-            if (LiSendTouchEvent(eventType, touch.fingerId, touch.position.x / (float) Application::contentWidth,
-                                 touch.position.y / (float) Application::contentHeight, 0, 0, 0, LI_ROT_UNKNOWN) ==
-                LI_ERR_UNSUPPORTED && i == 0) {
-                // Fallback to move cursor and click if touch unsupported
-                if (touch.phase != TouchPhase::NONE) {
-                    LiSendMousePositionEvent(touch.position.x, touch.position.y, Application::contentWidth,
-                                             Application::contentHeight);
-                }
-                if (touch.phase == TouchPhase::START) {
-                    LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_MOUSE_LEFT);
-                }
-                if (touch.phase == TouchPhase::END) {
-                    LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_MOUSE_LEFT);
-                }
-            }
+            const auto action = inputSession.touchAction(touch.fingerId, phase);
+            if (action && sendTouch(touch.fingerId, *action, touch.position))
+                inputSession.markTouchSent(touch.fingerId, *action);
         }
     }
 }
 
-short MoonlightInputManager::controllersToMap() {
-    switch (brls::Application::getPlatform()
-                ->getInputManager()
-                ->getControllersConnectedCount()) {
-    case 0:
-        return 0x0;
-    case 1:
-        return 0x1;
-    case 2:
-        return 0x3;
-    case 3:
-        return 0x7;
-    default:
-        return 0xF;
+bool MoonlightInputManager::sendTouch(uint32_t pointer, InputSessionState::TouchAction action,
+                                      brls::Point position) {
+    uint8_t event = LI_TOUCH_EVENT_CANCEL;
+    switch (action) {
+        case InputSessionState::TouchAction::Down: event = LI_TOUCH_EVENT_DOWN; break;
+        case InputSessionState::TouchAction::Move: event = LI_TOUCH_EVENT_MOVE; break;
+        case InputSessionState::TouchAction::Up: event = LI_TOUCH_EVENT_UP; break;
+        case InputSessionState::TouchAction::Cancel: break;
     }
+    if (Application::contentWidth <= 0 || Application::contentHeight <= 0) return false;
+    const float x = std::clamp(position.x / Application::contentWidth, 0.0f, 1.0f);
+    const float y = std::clamp(position.y / Application::contentHeight, 0.0f, 1.0f);
+    const int result = fallbackTouchId == pointer ? LI_ERR_UNSUPPORTED
+        : LiSendTouchEvent(event, pointer, x, y,
+            action == InputSessionState::TouchAction::Down || action == InputSessionState::TouchAction::Move ? 1.0f : 0.0f,
+            0, 0, LI_ROT_UNKNOWN);
+    if (result != LI_ERR_UNSUPPORTED) return result == 0;
+    if (fallbackTouchId && *fallbackTouchId != pointer) return false;
+    if (action != InputSessionState::TouchAction::Down && fallbackTouchId != pointer) return false;
+    if (action == InputSessionState::TouchAction::Down || action == InputSessionState::TouchAction::Move) {
+        if (LiSendMousePositionEvent(position.x, position.y, Application::contentWidth, Application::contentHeight) != 0)
+            return false;
+    }
+    if (action == InputSessionState::TouchAction::Down) {
+        if (LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_MOUSE_LEFT) != 0) return false;
+        fallbackTouchId = pointer;
+    } else if (action == InputSessionState::TouchAction::Up || action == InputSessionState::TouchAction::Cancel) {
+        if (LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_MOUSE_LEFT) != 0) return false;
+        fallbackTouchId.reset();
+    }
+    return true;
+}
+
+bool MoonlightInputManager::cancelTouches() {
+    bool sent = true;
+    const auto active = inputSession.activeTouches();
+    for (auto pointer : active) {
+        if (sendTouch(pointer, InputSessionState::TouchAction::Cancel, {}))
+            inputSession.markTouchSent(pointer, InputSessionState::TouchAction::Cancel);
+        else sent = false;
+    }
+    return sent;
 }
 
 brls::ControllerState
@@ -631,11 +671,15 @@ MoonlightInputManager::mapController(brls::ControllerState controller) {
 }
 
 void MoonlightInputManager::leftMouseClick() {
+    auto& manager = MoonlightInputManager::instance();
+    if (!manager.inputEnabled || !manager.isSessionCurrent()) return;
     LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_MOUSE_LEFT);
     LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_MOUSE_LEFT);
 }
 
 void MoonlightInputManager::rightMouseClick() {
+    auto& manager = MoonlightInputManager::instance();
+    if (!manager.inputEnabled || !manager.isSessionCurrent()) return;
     LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_MOUSE_RIGHT);
     LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_MOUSE_RIGHT);
 }

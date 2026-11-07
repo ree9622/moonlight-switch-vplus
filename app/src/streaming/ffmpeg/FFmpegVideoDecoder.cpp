@@ -42,6 +42,20 @@ FFmpegVideoDecoder::FFmpegVideoDecoder() {
 
 FFmpegVideoDecoder::~FFmpegVideoDecoder() = default;
 
+VideoDecoderDiagnostics FFmpegVideoDecoder::diagnostics() const {
+    VideoDecoderDiagnostics result;
+    result.codec = avcodec_get_name(static_cast<AVCodecID>(m_diagnostic_codec.load()));
+    const auto format = static_cast<AVPixelFormat>(m_diagnostic_frame_format.load());
+    result.frameReceived = format != AV_PIX_FMT_NONE;
+    if (result.frameReceived) {
+        const char* name = av_get_pix_fmt_name(format);
+        result.pixelFormat = name ? name : "unknown";
+        const auto* descriptor = av_pix_fmt_desc_get(format);
+        result.hardwareFrame = descriptor && (descriptor->flags & AV_PIX_FMT_FLAG_HWACCEL);
+    }
+    return result;
+}
+
 void ffmpegLog(void* ptr, int level, const char* fmt, va_list vargs) {
     std::string message;
     va_list ap_copy;
@@ -390,6 +404,8 @@ int FFmpegVideoDecoder::prepare_android_h264_extradata(PDECODE_UNIT decode_unit)
 
 int FFmpegVideoDecoder::setup(int video_format, int width, int height,
                               int redraw_rate, void* context, int dr_flags) {
+    m_diagnostic_frame_format.store(AV_PIX_FMT_NONE);
+    m_diagnostic_codec.store(AV_CODEC_ID_NONE);
     m_stream_fps = redraw_rate;
 #if defined(PLATFORM_ANDROID)
     ffmpeg::decoder::cleanupAndroidMediaCodecState(m_android_mediacodec);
@@ -506,6 +522,8 @@ int FFmpegVideoDecoder::setup(int video_format, int width, int height,
         brls::Logger::error("FFmpeg: Couldn't find decoder");
         return -1;
     }
+
+    m_diagnostic_codec.store(m_codec_id);
 
     int err = 0;
 
@@ -981,6 +999,9 @@ int FFmpegVideoDecoder::get_frame(bool native_frame, AVFrame** frame) {
         decodeFrame->hw_frames_ctx != nullptr ||
         (decodedFormat != nullptr &&
          (decodedFormat->flags & AV_PIX_FMT_FLAG_HWACCEL) != 0);
+    // Report the actual output format rather than inferring hardware use from
+    // successful device allocation. Read by the UI through atomic snapshots.
+    m_diagnostic_frame_format.store(decodeFrame->format);
 
     if (hardwareBackedFrame) {
 #if defined(BOREALIS_USE_DEKO3D) || defined(USE_METAL_RENDERER) || defined(PLATFORM_ANDROID)
