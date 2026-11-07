@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install protocol test dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y libjansson-dev libexpat1-dev
+        run: sudo apt-get update -qq && sudo apt-get install -y libjansson-dev libexpat1-dev libavcodec-dev libavutil-dev pkg-config
       - name: Test malformed responses and command isolation
         run: |
           cmake -S tests -B build/protocol-tests -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"

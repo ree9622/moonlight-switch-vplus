@@ -385,6 +385,14 @@ void StreamingView::draw(NVGcontext* vg, float x, float y, float width,
                     /*stats->video_render_stats.rendered_frames*/);
             }
 
+            const auto pacing = AVFrameHolder::instance().getPacingDiagnostics();
+            statistics += fmt::format("Pacing: {} | display vsync: {}\n"
+                                      "Host PTS frames | missing | clock resets: {} | {} | {}\n"
+                                      "Host clock MAD | cushion: {:.3f} | {:.3f} ms\n",
+                pacing.requested ? "V+ host-cadence" : "legacy local",
+                pacing.requested ? (pacing.displaySynced ? "event" : "unavailable") : "swapchain",
+                pacing.hostFrames, pacing.missingPts, pacing.resets, pacing.jitterMs, pacing.cushionMs);
+
             statistics += fmt::format("Frames queue underflows | skipped: {} | {}\n"
                                       "Queue empty | startup holds: {} | {}\n"
                                       "Queue overflow | paced skips: {} | {}\n"

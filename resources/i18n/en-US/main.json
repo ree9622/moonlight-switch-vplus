@@ -21,7 +21,10 @@
         "applied": "Bitrate applied. This value will also be used for the next stream.",
         "confirm_command": "Run this command on the connected computer?",
         "execute": "Run",
-        "command_accepted": "The computer accepted the command. Check its result on the computer."
+        "command_accepted": "The computer accepted the command. Check its result on the computer.",
+        "pacing": "Frame pacing (reconnect to apply)",
+        "pacing_host": "V+ host-cadence precise sync",
+        "pacing_legacy": "Legacy local pacing"
     },
     "about": {
         "about": "Moonlight-Switch is a third-party game streaming client based on Moonlight-Common-C for the Nintendo Switch",

@@ -80,6 +80,9 @@ int FFmpegVideoDecoder::configure_decoder_context(bool enable_hw_decode,
         return AVERROR(ENOMEM);
     }
 
+#if defined(PLATFORM_SWITCH)
+    m_decoder_context->pkt_timebase = AVRational{1, 1000000};
+#endif
     m_decoder_context->flags |= AV_CODEC_FLAG_OUTPUT_CORRUPT;
     m_decoder_context->flags2 |= AV_CODEC_FLAG2_SHOW_ALL;
     m_decoder_context->flags2 |= AV_CODEC_FLAG2_FAST;
@@ -791,7 +794,7 @@ int FFmpegVideoDecoder::submit_decode_unit(PDECODE_UNIT decode_unit) {
             brls::Logger::error("FFmpeg: Big buffer to decode...");
         }
 
-        const int decoded_frames = decode(m_ffmpeg_buffer, length);
+        const int decoded_frames = decode(m_ffmpeg_buffer, length, decode_unit->presentationTimeUs);
         if (decoded_frames >= 0) {
             m_frames_out += decoded_frames;
 
@@ -872,9 +875,17 @@ int FFmpegVideoDecoder::capabilities() const {
 #endif
 }
 
-int FFmpegVideoDecoder::decode(char* indata, int inlen) {
+int FFmpegVideoDecoder::decode(char* indata, int inlen, uint64_t hostPtsUs) {
     m_packet->data = (uint8_t*)indata;
     m_packet->size = inlen;
+#if defined(PLATFORM_SWITCH)
+    // Preserve the common-c RTP-derived host timestamp through decoder reorder
+    // and EAGAIN draining. Missing host PTS is synthesized by common-c itself.
+    m_packet->pts = static_cast<int64_t>(hostPtsUs);
+    m_packet->dts = AV_NOPTS_VALUE;
+#else
+    (void)hostPtsUs;
+#endif
 
 #if defined(_WIN32)
     (void) SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);

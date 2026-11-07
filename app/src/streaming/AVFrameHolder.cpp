@@ -5,7 +5,7 @@
 // Created by XITRIX on 31.03.2025.
 //
 
-#include "AVFrameHolder.hpp"
+#include "AVFrameQueue.hpp"
 
 #include <algorithm>
 
@@ -69,15 +69,15 @@ bool AVFrameQueue::push(AVFrame* item) {
         return false;
     }
 
-    queue.push(queuedFrame);
+    queue.push(timedFrameLocked(queuedFrame));
     recordArrivalLocked(std::chrono::steady_clock::now());
     pushesSincePop++;
     maxPushBurstStat = std::max(maxPushBurstStat, pushesSincePop);
 
     if (queue.size() > limit) {
-        const size_t keepFrames = targetBufferedFrames + 1;
+        const size_t keepFrames = hostCadenceEnabled ? limit : targetBufferedFrames + 1;
         while (queue.size() > keepFrames) {
-            AVFrame* droppedFrame = queue.front();
+            AVFrame* droppedFrame = queue.front().frame;
             queue.pop();
             recycleFrame(freeQueue, droppedFrame);
             framesDroppedStat++;
@@ -96,6 +96,16 @@ bool AVFrameQueue::pushTransferred(AVFrame* item) {
 }
 
 AVFrame* AVFrameQueue::pop(bool* consumed) {
+    std::shared_ptr<DisplayVsyncClock> clock;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        clock = displayClock;
+    }
+    const auto tick = clock ? clock->waitNext() : DisplayVsyncClock::Tick{};
+    return popForDisplay(tick, consumed);
+}
+
+AVFrame* AVFrameQueue::popForDisplay(const DisplayVsyncClock::Tick& tick, bool* consumed) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
     pushesSincePop = 0;
@@ -103,6 +113,8 @@ AVFrame* AVFrameQueue::pop(bool* consumed) {
     if (consumed) {
         *consumed = false;
     }
+
+    if (hostCadenceEnabled) return popPreciseLocked(tick, consumed);
 
     const auto now = std::chrono::steady_clock::now();
     if (!drawClockStarted) {
@@ -216,7 +228,7 @@ AVFrame* AVFrameQueue::pop(bool* consumed) {
 
     recycleFrame(freeQueue, bufferFrame);
     for (size_t i = 0; i < consumeCount; i++) {
-        AVFrame* item = queue.front();
+        AVFrame* item = queue.front().frame;
         queue.pop();
 
         if (i + 1 < consumeCount) {
@@ -236,6 +248,64 @@ AVFrame* AVFrameQueue::pop(bool* consumed) {
     return bufferFrame;
 }
 
+// Stage 1 is sampled on the decoded-frame callback, never at display dequeue.
+AVFrameQueue::QueuedFrame AVFrameQueue::timedFrameLocked(AVFrame* frame) {
+    int64_t target = 0;
+    if (hostCadenceEnabled && frame->pts != AV_NOPTS_VALUE && frame->pts >= 0) {
+        target = hostClock.presentTimeNs(DisplayVsyncClock::nowNs(), frame->pts, 16666667);
+        hostTimedFrames++;
+    } else if (hostCadenceEnabled) {
+        missingHostPts++;
+    }
+    return {frame, target};
+}
+
+AVFrame* AVFrameQueue::popPreciseLocked(const DisplayVsyncClock::Tick& tick, bool* consumed) {
+    displaySynced = tick.synchronized;
+    if (queue.empty()) {
+        if (bufferFrame) {
+            fakeFrameUsedStat++;
+            emptyQueueStat++;
+        }
+        return bufferFrame;
+    }
+    if (tick.synchronized && queue.front().targetNs != 0) {
+        // Stage 2: snap to the real display-event lattice. Deko3D submits on
+        // this tick for the next display edge; unlike MediaCodec it cannot
+        // attach a future presentation timestamp to an output buffer.
+        const auto snapped = computeHostCadenceSnapTime(queue.front().targetNs,
+            tick.edgeNs, tick.edgeNs, tick.intervalNs);
+        if (snapped.resetClock) {
+            hostClock.reset();
+            auto frames = queue;
+            queue = {};
+            while (!frames.empty()) {
+                auto item = frames.front(); frames.pop();
+                item.targetNs = 0;
+                queue.push(item);
+            }
+            playoutResyncStat++;
+        } else if (snapped.targetNs > tick.edgeNs + tick.intervalNs) {
+            scheduledHoldStat++;
+            return bufferFrame;
+        }
+    }
+    recycleFrame(freeQueue, bufferFrame);
+    bufferFrame = queue.front().frame;
+    queue.pop();
+    if (consumed) *consumed = true;
+    localClockPacedFrameStat++;
+    return bufferFrame;
+}
+
+AVFrameQueue::PacingDiagnostics AVFrameQueue::pacingDiagnostics() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return {hostCadenceEnabled, displaySynced, hostTimedFrames, missingHostPts,
+        hostClock.resetCount(), hostClock.jitterEstimateNs() / 1000000.0,
+        static_cast<double>(hostClock.cushionNs()) / 1000000.0,
+        queue.empty() ? 0 : queue.front().targetNs};
+}
+
 AVFrame* AVFrameQueue::acquireWriteFrame() {
     std::lock_guard<std::mutex> lock(m_mutex);
     return acquireFrameLocked();
@@ -247,11 +317,17 @@ void AVFrameQueue::recycleWriteFrame(AVFrame*& frame) {
 }
 
 void AVFrameQueue::configure(size_t queueLimit, int configuredStreamFps,
-                             bool transferOwnershipEnabled) {
+                             bool transferOwnershipEnabled, bool preciseSyncEnabled) {
     std::lock_guard<std::mutex> lock(m_mutex);
     const size_t configuredDepth = std::max<size_t>(queueLimit, 1);
-    limit = capacityFor(configuredDepth);
-    targetBufferedFrames =
+    hostCadenceEnabled = preciseSyncEnabled;
+    displayClock = hostCadenceEnabled ? std::make_shared<DisplayVsyncClock>() : nullptr;
+    displaySynced = false;
+    hostClock = {};
+    hostTimedFrames = missingHostPts = 0;
+    // V+ outputBufferQueueLimit is a hard bound, not a startup reserve.
+    limit = hostCadenceEnabled ? std::clamp<size_t>(configuredDepth, 1, 3) : capacityFor(configuredDepth);
+    targetBufferedFrames = hostCadenceEnabled ? 0 :
         configuredDepth > 1 ? std::min<size_t>(configuredDepth - 1, 2) : 0;
     transferOwnership = transferOwnershipEnabled;
     streamFps = configuredStreamFps;
@@ -355,15 +431,15 @@ bool AVFrameQueue::pushTransferredLocked(AVFrame* item) {
         return false;
     }
 
-    queue.push(item);
+    queue.push(timedFrameLocked(item));
     recordArrivalLocked(std::chrono::steady_clock::now());
     pushesSincePop++;
     maxPushBurstStat = std::max(maxPushBurstStat, pushesSincePop);
 
     if (queue.size() > limit) {
-        const size_t keepFrames = targetBufferedFrames + 1;
+        const size_t keepFrames = hostCadenceEnabled ? limit : targetBufferedFrames + 1;
         while (queue.size() > keepFrames) {
-            AVFrame* droppedFrame = queue.front();
+            AVFrame* droppedFrame = queue.front().frame;
             queue.pop();
             recycleFrame(freeQueue, droppedFrame);
             framesDroppedStat++;
@@ -439,9 +515,9 @@ void AVFrameQueue::resetArrivalRateEstimatorLocked() {
 }
 
 void AVFrameQueue::trimToPlayoutWindowLocked() {
-    const size_t keepFrames = targetBufferedFrames + 1;
+    const size_t keepFrames = hostCadenceEnabled ? limit : targetBufferedFrames + 1;
     while (queue.size() > keepFrames) {
-        AVFrame* droppedFrame = queue.front();
+        AVFrame* droppedFrame = queue.front().frame;
         queue.pop();
         recycleFrame(freeQueue, droppedFrame);
         framesDroppedStat++;
@@ -477,7 +553,15 @@ void AVFrameQueue::cleanup() {
         av_frame_free(&bufferFrame);
     }
 
-    freeFrameQueue(queue);
+    while (!queue.empty()) {
+        AVFrame* frame = queue.front().frame;
+        queue.pop();
+        av_frame_free(&frame);
+    }
+    displayClock.reset();
+    hostCadenceEnabled = displaySynced = false;
+    hostClock = {};
+    hostTimedFrames = missingHostPts = 0;
     freeFrameQueue(freeQueue);
     queue = {};
     freeQueue = {};

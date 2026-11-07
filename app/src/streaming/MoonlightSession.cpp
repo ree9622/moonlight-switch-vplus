@@ -433,13 +433,16 @@ void MoonlightSession::draw(NVGcontext* vg, int width, int height) {
             const bool hasRtt = LiGetEstimatedRttInfo(&rtt, &variance);
             const auto& video = m_session_stats.video_decode_stats;
             const auto& render = m_session_stats.video_render_stats;
+            const auto pacing = AVFrameHolder::instance().getPacingDiagnostics();
             writeClientDiagnostics(Settings::instance().working_dir(),
                 fmt::format("session={} t_ms={} mode={}x{}@{} requested_kbps={} codec={} frame={} hardware={} "
                             "received_fps={:.2f} decoded_fps={:.2f} rendered_fps={:.2f} decode_ms={:.2f} "
                             "decoder_delay_ms={:.2f} network_drops={} rtt_ms={} rtt_variance_ms={} "
                             "queue={} reserve={} capacity={} render_ms={:.2f} post_ms={:.2f} rcas_ms={:.2f} "
                             "post_frames={} rcas_requested={} queue_empty={} queue_skips={} "
-                            "queue_holds={} queue_presented={} queue_resyncs={} source_fps={:.2f}",
+                            "queue_holds={} queue_presented={} queue_resyncs={} source_fps={:.2f} "
+                            "host_cadence={} vsync={} host_pts_frames={} missing_pts={} clock_resets={} "
+                            "clock_mad_ms={:.3f} cushion_ms={:.3f}",
                     connection_generation(), now, m_config.width, m_config.height, m_config.fps, m_config.bitrate,
                     decoder.codec, decoder.pixelFormat, decoder.frameReceived ? (decoder.hardwareFrame ? "yes" : "no") : "pending",
                     video.current_received_fps, video.current_decoded_fps, render.rendered_fps,
@@ -454,7 +457,9 @@ void MoonlightSession::draw(NVGcontext* vg, int width, int height) {
                     AVFrameHolder::instance().getFrameQueueScheduledHoldStat(),
                     AVFrameHolder::instance().getFrameQueueLocalClockPacedFrameStat(),
                     AVFrameHolder::instance().getFrameQueuePlayoutResyncStat(),
-                    AVFrameHolder::instance().getFrameQueueEstimatedSourceFps()));
+                    AVFrameHolder::instance().getFrameQueueEstimatedSourceFps(),
+                    pacing.requested ? "yes" : "no", pacing.displaySynced ? "yes" : "no",
+                    pacing.hostFrames, pacing.missingPts, pacing.resets, pacing.jitterMs, pacing.cushionMs));
             m_last_diagnostics_sample_ms = now;
             m_last_diagnostics_generation = connection_generation();
         }

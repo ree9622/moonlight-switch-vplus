@@ -38,3 +38,26 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(video_stats_window_test PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 add_test(NAME video_stats_window COMMAND video_stats_window_test)
+
+add_executable(host_cadence_test host_cadence_test.cpp)
+target_compile_features(host_cadence_test PRIVATE cxx_std_17)
+target_include_directories(host_cadence_test PRIVATE ../app/src/streaming)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(host_cadence_test PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+add_test(NAME host_cadence COMMAND host_cadence_test)
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FFMPEG_QUEUE REQUIRED IMPORTED_TARGET libavcodec libavutil)
+find_package(Threads REQUIRED)
+add_executable(precise_queue_test
+    precise_queue_test.cpp
+    ../app/src/streaming/AVFrameHolder.cpp
+    ../app/src/streaming/DisplayVsyncClock.cpp)
+target_compile_features(precise_queue_test PRIVATE cxx_std_17)
+target_include_directories(precise_queue_test PRIVATE ../app/src/streaming)
+target_link_libraries(precise_queue_test PRIVATE PkgConfig::FFMPEG_QUEUE Threads::Threads)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(precise_queue_test PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+add_test(NAME precise_queue COMMAND precise_queue_test)

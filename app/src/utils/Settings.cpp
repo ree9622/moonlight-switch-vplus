@@ -305,6 +305,11 @@ void Settings::load() {
                 }
             }
 
+            if (json_t* host_cadence = json_object_get(settings, "enable_host_cadence_precise_sync")) {
+                if (json_is_boolean(host_cadence))
+                    m_enable_host_cadence_precise_sync = json_is_true(host_cadence);
+            }
+
             if (json_t* frames_queue_size = json_object_get(settings, "frames_queue_size")) {
                 if (json_typeof(frames_queue_size) == JSON_INTEGER) {
                     m_frames_queue_size = (int)json_integer_value(frames_queue_size);
@@ -539,6 +544,7 @@ void Settings::save() {
             json_object_set_new(settings, "bitrate", json_integer(m_bitrate));
             json_object_set_new(settings, "decoder_threads", json_integer(m_decoder_threads));
             json_object_set_new(settings, "frames_queue_size", json_integer(m_frames_queue_size));
+            json_object_set_new(settings, "enable_host_cadence_precise_sync", json_boolean(m_enable_host_cadence_precise_sync));
             json_object_set_new(settings, "enable_hdr", m_enable_hdr ? json_true() : json_false());
             json_object_set_new(settings, "enable_upscaling", upscaling() ? json_true() : json_false());
             json_object_set_new(settings, "upscaling_mode", json_integer(upscaling_mode()));

@@ -241,6 +241,9 @@ class Settings : public Singleton<Settings> {
     void set_frames_queue_size(int frames_queue_size) { m_frames_queue_size = frames_queue_size; }
     [[nodiscard]] int frames_queue_size() const { return m_frames_queue_size; }
 
+    void set_enable_host_cadence_precise_sync(bool value) { m_enable_host_cadence_precise_sync = value; }
+    [[nodiscard]] bool enable_host_cadence_precise_sync() const { return m_enable_host_cadence_precise_sync; }
+
     void set_sops(bool sops) { m_sops = sops; }
     [[nodiscard]] bool sops() const { return m_sops; }
 
@@ -355,7 +358,12 @@ class Settings : public Singleton<Settings> {
     int m_rcas_strength = 20;
     bool m_click_by_tap = false;
     int m_decoder_threads = 4;
+#ifdef PLATFORM_SWITCH
+    int m_frames_queue_size = 2;
+#else
     int m_frames_queue_size = 3;
+#endif
+    bool m_enable_host_cadence_precise_sync = true;
     bool m_sops = false;
     bool m_play_audio = false;
     bool m_write_log = false;

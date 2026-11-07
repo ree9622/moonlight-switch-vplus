@@ -25,7 +25,7 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
     VideoDecoderDiagnostics diagnostics() const override;
 
   private:
-    int decode(char* indata, int inlen);
+    int decode(char* indata, int inlen, uint64_t hostPtsUs);
     int drain_frames();
     int get_frame(bool native_frame, AVFrame** frame);
     int configure_decoder_context(bool enable_hw_decode, bool enable_low_delay,
